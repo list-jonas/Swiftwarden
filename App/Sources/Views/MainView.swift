@@ -19,13 +19,18 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 440)
         } detail: {
-            switch model.sidebar {
-            case .sends: SendDetailContainer()
-            case .generator: GeneratorHistoryView()
-            default: ItemDetailContainer()
+            Group {
+                switch model.sidebar {
+                case .sends: SendDetailContainer()
+                case .generator: GeneratorHistoryView()
+                default: ItemDetailContainer()
+                }
             }
+            .navigationSplitViewColumnWidth(min: 360, ideal: 560)
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
     }
 }
+
+
 

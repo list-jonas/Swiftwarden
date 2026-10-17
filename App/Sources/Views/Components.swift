@@ -122,7 +122,8 @@ struct ItemIcon: View {
                     .offset(x: size * 0.14, y: size * 0.14)
             }
         }
-        .task(id: cipher.primaryHost) {
+        .task(id: cipher.id + "|" + (cipher.primaryHost ?? "")) {
+            icon = nil
             guard showIcons, cipher.type == .login, let h = cipher.primaryHost, let base = AppModel.shared.account?.env.iconsURL else { return }
             icon = await IconStore.shared.icon(h, base: base)
         }
@@ -223,8 +224,11 @@ struct DetailRow<Value: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Text(label).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary.opacity(0.9))
+                .fixedSize()
             Spacer(minLength: 16)
             value.font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
+                .layoutPriority(-1)
                 .opacity(copied ? 0 : 1)
                 .scaleEffect(copied ? 0.92 : 1, anchor: .trailing)
                 .blur(radius: copied ? 2 : 0)
@@ -322,5 +326,7 @@ func revealInFinderSave(_ data: Data, name: String) {
     p.nameFieldStringValue = name
     if p.runModal() == .OK, let u = p.url { try? data.write(to: u) }
 }
+
+
 
 

@@ -45,7 +45,7 @@ struct ItemDetailView: View {
                 if !(cipher.attachments ?? []).isEmpty { attachmentsCard }
             }
             .padding(16)
-            .frame(maxWidth: 760)
+            .frame(minWidth: 320, idealWidth: 520, maxWidth: 760)
             .frame(maxWidth: .infinity)
         }
         .toolbar { toolbar }
@@ -396,5 +396,6 @@ struct MoveToOrgSheet: View {
         .onAppear { org = model.organizations.first?.id ?? "" }
     }
 }
+
 
 
