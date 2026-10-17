@@ -11,24 +11,20 @@ struct SuggestionView: View {
     let onUnlocked: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "lock.shield.fill").foregroundStyle(.tint)
-                Text("Swiftwarden").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                Spacer()
-                Button(action: onDismiss) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)) }.buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 8).padding(.top, 6)
+        VStack(alignment: .leading, spacing: 2) {
             if model.phase != .unlocked {
-                Button {
-                    Task {
-                        if await model.unlockWithBiometrics() { onUnlocked() } else { NSApp.activate(ignoringOtherApps: true) }
+                HStack(spacing: 0) {
+                    Button {
+                        Task {
+                            if await model.unlockWithBiometrics() { onUnlocked() } else { NSApp.activate(ignoringOtherApps: true) }
+                        }
+                    } label: {
+                        Label(model.biometricEnabled ? "Unlock with Touch ID" : "Open Swiftwarden to unlock", systemImage: model.biometricEnabled ? "touchid" : "lock")
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } label: {
-                    Label(model.biometricEnabled ? "Unlock with Touch ID" : "Open Swiftwarden to unlock", systemImage: model.biometricEnabled ? "touchid" : "lock")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .buttonStyle(SuggestionButtonStyle())
+                    closeButton
                 }
-                .buttonStyle(SuggestionButtonStyle())
             } else {
                 ForEach(matches) { c in
                     Button { onFill(c) } label: {
@@ -44,19 +40,31 @@ struct SuggestionView: View {
                     .buttonStyle(SuggestionButtonStyle())
                 }
                 if matches.isEmpty {
-                    Text("No logins for \(target.contextLabel)").font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 8)
+                    Text("No logins for \(target.contextLabel)").font(.system(size: 12)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.top, 4)
                 }
-                Divider().padding(.horizontal, 6)
-                Button(action: onSearch) {
-                    Label("Search vault…", systemImage: "magnifyingglass").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+                if !matches.isEmpty { Divider().padding(.horizontal, 6) }
+                HStack(spacing: 0) {
+                    Button(action: onSearch) {
+                        Label("Search vault…", systemImage: "magnifyingglass").font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(SuggestionButtonStyle())
+                    closeButton
                 }
-                .buttonStyle(SuggestionButtonStyle())
             }
         }
-        .padding(.bottom, 6)
+        .padding(.vertical, 4)
         .frame(width: 280)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.1)))
+    }
+}
+
+extension SuggestionView {
+    var closeButton: some View {
+        Button(action: onDismiss) { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
+            .buttonStyle(.borderless)
+            .padding(.trailing, 10)
+            .help("Dismiss")
     }
 }
 
@@ -134,3 +142,4 @@ struct QuickFillView: View {
 extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }
+
