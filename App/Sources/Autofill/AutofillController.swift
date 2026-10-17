@@ -6,9 +6,11 @@ import SwiftwardenCore
 struct FillTarget {
     let app: NSRunningApplication
     let element: AXUIElement
-    let isPassword: Bool
+    let kind: FieldKind
     let frame: CGRect
     let url: String?
+
+    var isPassword: Bool { kind == .password }
 
     var contextLabel: String {
         if let url, let h = URLMatcher.host(of: url) { return h }
@@ -36,7 +38,10 @@ final class AutofillController {
         "ai.perplexity.comet", "com.sigmaos.sigmaos.macos", "com.kagi.kagimacOS",
     ]
 
-    static let userHints = ["user", "email", "e-mail", "login", "account", "benutzer", "anmelde", "konto", "identifier", "mail"]
+    static let browsers: Set<String> = [
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition",
+        "org.mozilla.nightly", "net.waterfox.waterfox", "org.torproject.torbrowser", "com.duckduckgo.macos.browser", "com.kagi.kagimacOS",
+    ]
 
     var trusted: Bool { AXIsProcessTrusted() }
     var enabled: Bool { Prefs.d.bool(forKey: Prefs.autofillEnabled) }
@@ -117,11 +122,16 @@ final class AutofillController {
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         guard let el = AX.element(appEl, kAXFocusedUIElementAttribute) else { return nil }
         let secure = AX.isSecure(el)
-        if requireLoginField {
-            guard secure || (AX.isTextInput(el) && Self.userHints.contains(where: AX.hint(el).contains)) else { return nil }
+        guard secure || AX.isTextInput(el) || !requireLoginField else { return nil }
+        var kind: FieldKind = secure || AX.isTextInput(el) ? AX.kind(el) : .unknown
+        if AX.isSearch(el) && !secure { kind = .unknown }
+        if kind == .unknown, AX.isTextInput(el), !AX.isSearch(el),
+           let next = AX.nextInput(after: el), AX.isSecure(next) {
+            kind = .username
         }
+        if requireLoginField, kind == .unknown { return nil }
         let frame = AX.frame(el) ?? CGRect(x: NSScreen.main?.frame.midX ?? 400, y: NSScreen.main?.frame.midY ?? 400, width: 1, height: 1)
-        return FillTarget(app: app, element: el, isPassword: secure, frame: frame, url: webURL(el))
+        return FillTarget(app: app, element: el, kind: kind, frame: frame, url: webURL(el))
     }
 
     private func webURL(_ el: AXUIElement) -> String? {
@@ -139,8 +149,29 @@ final class AutofillController {
     func candidates(_ t: FillTarget) -> [Cipher] {
         let m = AppModel.shared
         guard m.phase == .unlocked else { return [] }
-        if let u = t.url { return m.matches(url: u) }
-        return m.matches(bundleId: t.app.bundleIdentifier ?? "", appName: t.app.localizedName ?? "")
+        if t.kind.isCard { return m.items(for: .type(.card), query: "") }
+        if t.kind.isIdentity { return m.items(for: .type(.identity), query: "") }
+        let isBrowser = Self.browsers.contains(t.app.bundleIdentifier ?? "") || Self.chromiumBrowsers.contains(t.app.bundleIdentifier ?? "")
+        let logins: [Cipher]
+        if let u = t.url { logins = m.matches(url: u) }
+        else if isBrowser { logins = [] }
+        else { logins = m.matches(bundleId: t.app.bundleIdentifier ?? "", appName: t.app.localizedName ?? "") }
+        switch t.kind {
+        case .totp:
+            let withCode = logins.filter(\.hasTotp)
+            return withCode.isEmpty ? logins : withCode
+        case .pin:
+            let withPin = logins.filter { Self.pinValue($0, hints: nil) != nil }
+            return withPin.isEmpty ? logins : withPin
+        default:
+            return logins
+        }
+    }
+
+    static func pinValue(_ c: Cipher, hints: FieldHints?) -> String? {
+        let usable = (c.fields ?? []).filter { $0.type == .text || $0.type == .hidden }
+        if let h = hints, let f = usable.first(where: { FieldClassifier.customFieldMatches($0.name ?? "", hints: h) }) { return f.value }
+        return usable.first { FieldClassifier.classify(FieldHints(texts: [$0.name ?? ""])) == .pin }?.value
     }
 
     func focusChanged() {
@@ -151,7 +182,7 @@ final class AutofillController {
         target = t
         let m = AppModel.shared
         let matches = candidates(t)
-        if !t.isPassword && matches.isEmpty && m.phase == .unlocked { suggestions.hide(); return }
+        if t.kind != .password && matches.isEmpty && m.phase == .unlocked { suggestions.hide(); return }
         if m.phase == .loggedOut { suggestions.hide(); return }
         showSuggestions(t, matches)
     }
@@ -213,50 +244,133 @@ final class AutofillController {
     }
 
     private func performFill(_ c: Cipher, _ t: FillTarget) {
-        let user = c.login?.username ?? ""
-        let pass = c.canViewPassword ? (c.login?.password ?? "") : ""
-        var userEl: AXUIElement?
-        var passEl: AXUIElement?
-        if t.isPassword {
-            passEl = t.element
-            userEl = counterpart(of: t.element, wantSecure: false, before: true)
-        } else {
-            userEl = t.element
-            passEl = counterpart(of: t.element, wantSecure: true, before: false)
+        var plan: [(AXUIElement, String)]
+        switch c.type {
+        case .login: plan = loginPlan(c, t)
+        case .card, .identity: plan = formPlan(c, t)
+        default: plan = []
         }
+        plan = plan.filter { !$0.1.isEmpty }
+        guard !plan.isEmpty else { AppModel.shared.showToast("Nothing to fill for this field"); return }
         let method = Prefs.d.string(forKey: Prefs.fillMethod) ?? "type"
-        let submit = Prefs.d.bool(forKey: Prefs.autoSubmit)
-        let fields = [(userEl, user), (passEl, pass)].filter { $0.0 != nil && !$0.1.isEmpty }.map { ($0.0!, $0.1) }
+        let submit = Prefs.d.bool(forKey: Prefs.autoSubmit) && c.type == .login && t.kind.isLogin
         let app = t.app
-        let lastEl = fields.last?.0
         DispatchQueue.global(qos: .userInitiated).async {
             Filler.waitForModifiersReleased()
             app.activate()
             usleep(120_000)
-            for (el, text) in fields {
+            for (el, text) in plan {
                 Filler.set(text, on: el, method: method)
                 usleep(80_000)
             }
-            if submit, lastEl != nil { Filler.key(UInt16(kVK_Return)) }
+            if submit { Filler.key(UInt16(kVK_Return)) }
         }
-        if Prefs.d.bool(forKey: Prefs.copyTotpAfterFill), let s = c.login?.totp, let code = TOTP(s)?.code() {
-            m_copy(code)
+        let filledCode = c.login?.totp.flatMap { TOTP($0)?.code() }.map { code in plan.contains { $0.1 == code } } ?? false
+        if c.type == .login, !filledCode, Prefs.d.bool(forKey: Prefs.copyTotpAfterFill), let s = c.login?.totp, let code = TOTP(s)?.code() {
+            AppModel.shared.copy(code, "verification code")
         }
     }
 
-    private func m_copy(_ code: String) { AppModel.shared.copy(code, "verification code") }
-
-    private func counterpart(of el: AXUIElement, wantSecure: Bool, before: Bool) -> AXUIElement? {
-        var ancestor = AX.element(el, kAXParentAttribute)
-        var depth = 0
-        while let a = ancestor, depth < 12 {
-            let inputs = AX.collectInputs(a)
-            if let i = inputs.firstIndex(where: { CFEqual($0, el) }) {
-                let range = before ? Array(inputs[..<i].reversed()) : Array(inputs[(i + 1)...])
-                if let f = range.first(where: { AX.isSecure($0) == wantSecure }) { return f }
+    private func loginPlan(_ c: Cipher, _ t: FillTarget) -> [(AXUIElement, String)] {
+        let user = c.login?.username ?? ""
+        let pass = c.canViewPassword ? (c.login?.password ?? "") : ""
+        let code = c.login?.totp.flatMap { TOTP($0)?.code() } ?? ""
+        switch t.kind {
+        case .totp:
+            return [(t.element, code)]
+        case .pin:
+            return [(t.element, Self.pinValue(c, hints: AX.hints(t.element)) ?? "")]
+        default:
+            break
+        }
+        var plan: [(AXUIElement, String)] = []
+        var used: [AXUIElement] = []
+        func add(_ el: AXUIElement?, _ v: String) {
+            guard let el, !v.isEmpty, !used.contains(where: { CFEqual($0, el) }) else { return }
+            used.append(el)
+            plan.append((el, v))
+        }
+        let inputs = AX.formInputs(around: t.element, want: 6)
+        let kinds = inputs.map { ($0, AX.isSecure($0) ? FieldKind.password : AX.kind($0)) }
+        let idx = inputs.firstIndex { CFEqual($0, t.element) } ?? 0
+        if t.isPassword {
+            let before = kinds[..<min(idx, kinds.count)].reversed()
+            let userEl = before.first { $0.1 == .username || $0.1 == .email }?.0
+                ?? before.first { !AX.isSecure($0.0) && ![.totp, .pin].contains($0.1) && !$0.1.isCard && !AX.isSearch($0.0) }?.0
+            add(userEl, user)
+            add(t.element, pass)
+        } else {
+            add(t.element, user)
+            let after = idx + 1 < kinds.count ? Array(kinds[(idx + 1)...]) : []
+            add(after.first { AX.isSecure($0.0) }?.0, pass)
+        }
+        for (el, kind) in kinds where kind == .totp { add(el, code) }
+        for (el, kind) in kinds where !AX.isSecure(el) || kind == .pin {
+            guard !used.contains(where: { CFEqual($0, el) }) else { continue }
+            let h = AX.hints(el)
+            if let f = (c.fields ?? []).first(where: { ($0.type == .text || $0.type == .hidden) && FieldClassifier.customFieldMatches($0.name ?? "", hints: h) }) {
+                add(el, f.value ?? "")
+            } else if kind == .pin, let v = Self.pinValue(c, hints: h) {
+                add(el, v)
             }
-            ancestor = AX.element(a, kAXParentAttribute)
-            depth += 1
+        }
+        return plan
+    }
+
+    private func formPlan(_ c: Cipher, _ t: FillTarget) -> [(AXUIElement, String)] {
+        let inputs = AX.formInputs(around: t.element, want: 12)
+        var plan: [(AXUIElement, String)] = []
+        var filledKinds: Set<FieldKind> = []
+        for el in inputs where !AX.isSearch(el) {
+            let h = AX.hints(el)
+            let kind = FieldClassifier.classify(h)
+            guard kind != .unknown, !filledKinds.contains(kind) || kind == .address1 else { continue }
+            if let v = value(kind, c, hints: h), !v.isEmpty {
+                plan.append((el, v))
+                filledKinds.insert(kind)
+            }
+        }
+        if !plan.contains(where: { CFEqual($0.0, t.element) }), let v = value(t.kind, c, hints: AX.hints(t.element)) {
+            plan.insert((t.element, v), at: 0)
+        }
+        return plan
+    }
+
+    private func value(_ kind: FieldKind, _ c: Cipher, hints: FieldHints) -> String? {
+        if let card = c.card, c.type == .card {
+            let month = (card.expMonth ?? "").count == 1 ? "0" + card.expMonth! : (card.expMonth ?? "")
+            var year = card.expYear ?? ""
+            if year.count == 2 { year = "20" + year }
+            let short = FieldClassifier.normalize(hints.texts.joined(separator: " "))
+            let twoDigitYear = (short.contains(" yy ") || short.contains(" jj ")) && !short.contains("yyyy")
+            switch kind {
+            case .cardNumber: return card.number?.replacingOccurrences(of: " ", with: "")
+            case .cardCode: return card.code
+            case .cardholder, .fullName: return card.cardholderName
+            case .cardExpMonth: return month
+            case .cardExpYear: return twoDigitYear ? String(year.suffix(2)) : year
+            case .cardExpiry: return month.isEmpty || year.isEmpty ? nil : month + "/" + String(year.suffix(2))
+            default: return nil
+            }
+        }
+        if let i = c.identity, c.type == .identity {
+            switch kind {
+            case .firstName: return i.firstName
+            case .middleName: return i.middleName
+            case .lastName: return i.lastName
+            case .fullName: return [i.firstName, i.middleName, i.lastName].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " ")
+            case .email: return i.email
+            case .username: return i.username ?? i.email
+            case .phone: return i.phone
+            case .address1: return i.address1
+            case .address2: return [i.address2, i.address3].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: ", ")
+            case .city: return i.city
+            case .state: return i.state
+            case .postalCode: return i.postalCode
+            case .country: return i.country
+            case .company: return i.company
+            default: return nil
+            }
         }
         return nil
     }
@@ -281,7 +395,7 @@ enum Filler {
         usleep(8000)
     }
 
-    static func type(_ s: String) {
+    static func type(_ s: String, delay: useconds_t = 6000) {
         let src = CGEventSource(stateID: .hidSystemState)
         for ch in s {
             let u = Array(String(ch).utf16)
@@ -291,8 +405,20 @@ enum Filler {
                 e?.keyboardSetUnicodeString(stringLength: u.count, unicodeString: u)
                 e?.post(tap: .cghidEventTap)
             }
-            usleep(6000)
+            usleep(delay)
         }
+    }
+
+    static func clearAndType(_ text: String, delay: useconds_t) {
+        key(UInt16(kVK_ANSI_A), flags: .maskCommand)
+        key(UInt16(kVK_Delete))
+        usleep(40000)
+        type(text, delay: delay)
+    }
+
+    static func matches(_ el: AXUIElement, _ text: String) -> Bool {
+        guard let v = AX.string(el, kAXValueAttribute) else { return !AX.isSecure(el) }
+        return AX.isSecure(el) ? v.count == text.count : v == text
     }
 
     static func set(_ text: String, on el: AXUIElement, method: String) {
@@ -316,14 +442,16 @@ enum Filler {
                 }
             }
         default:
-            key(UInt16(kVK_ANSI_A), flags: .maskCommand)
-            key(UInt16(kVK_Delete))
-            type(text)
+            clearAndType(text, delay: 6000)
         }
-        usleep(250_000)
-        if !AX.isSecure(el), let v = AX.string(el, kAXValueAttribute), v != text {
-            AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
-        }
+        usleep(200_000)
+        if matches(el, text) { return }
+        AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
+        usleep(150_000)
+        if matches(el, text) { return }
+        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        usleep(80000)
+        clearAndType(text, delay: 15000)
     }
 }
 
@@ -361,6 +489,10 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
+
+
+
 
 
 

@@ -14,6 +14,7 @@ final class SeedTests: XCTestCase {
         c.name = "Local Test Site"; c.login?.username = "tester@example.com"; c.login?.password = "Test-Pa55-word!"
         c.login?.uris = [LoginUri(uri: "http://localhost:8899")]
         c.login?.totp = "JBSWY3DPEHPK3PXP"
+        c.fields = [Field(name: "PIN", value: "4711", type: .hidden)]
         _ = try await svc.save(c)
     }
 
@@ -77,4 +78,5 @@ final class SeedTests: XCTestCase {
         _ = try await svc.save(ssh)
     }
 }
+
 

@@ -55,6 +55,9 @@ public enum URLMatcher {
         let name = appName.lowercased().replacingOccurrences(of: " ", with: "")
         guard name.count >= 3, let h = host(of: raw) else { return false }
         let label = baseDomain(h).split(separator: ".").first.map(String.init) ?? ""
-        return label == name || bid.split(separator: ".").contains { String($0) == label && label.count >= 3 }
+        let generic: Set<String> = ["com", "org", "net", "io", "app", "apple", "google", "microsoft", "mac", "macos", "desktop", "client", "osx"]
+        let parts = bid.split(separator: ".").map(String.init).dropFirst(2).filter { !generic.contains($0) }
+        return label == name || (label.count >= 3 && !generic.contains(label) && parts.contains(label))
     }
 }
+

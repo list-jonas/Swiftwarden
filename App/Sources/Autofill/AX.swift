@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import ApplicationServices
+import SwiftwardenCore
 
 enum AX {
     static func raw(_ el: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -43,9 +44,59 @@ enum AX {
         return r == kAXTextFieldRole || r == kAXComboBoxRole || r == "AXSearchField"
     }
 
-    static func hint(_ el: AXUIElement) -> String {
-        [kAXDescriptionAttribute, kAXPlaceholderValueAttribute, kAXTitleAttribute, kAXIdentifierAttribute, kAXHelpAttribute, "AXDOMIdentifier"]
-            .compactMap { string(el, $0) }.joined(separator: " ").lowercased()
+    static func hints(_ el: AXUIElement) -> FieldHints {
+        var t: [String] = []
+        for a in [kAXPlaceholderValueAttribute, kAXDescriptionAttribute, kAXTitleAttribute, kAXIdentifierAttribute, "AXDOMIdentifier", kAXHelpAttribute] {
+            if let s = string(el, a), !s.isEmpty, s.count < 120 { t.append(s) }
+        }
+        if let classes = raw(el, "AXDOMClassList") as? [String] { t += classes.prefix(6) }
+        if let label = element(el, kAXTitleUIElementAttribute) {
+            t += [string(label, kAXValueAttribute), string(label, kAXTitleAttribute), string(label, kAXDescriptionAttribute)].compactMap { $0 }
+        }
+        if let parent = element(el, kAXParentAttribute) {
+            let kids = children(parent)
+            if let i = kids.firstIndex(where: { CFEqual($0, el) }) {
+                for sib in kids[..<i].reversed().prefix(3) {
+                    if isTextInput(sib) || isSecure(sib) { break }
+                    if string(sib, kAXRoleAttribute) == kAXStaticTextRole, let s = string(sib, kAXValueAttribute) ?? string(sib, kAXTitleAttribute),
+                       !s.isEmpty, s.count < 60 {
+                        t.append(s)
+                        break
+                    }
+                }
+            }
+        }
+        return FieldHints(texts: t, autocomplete: string(el, "AXAutocompleteValue"), isSecure: isSecure(el))
+    }
+
+    static func kind(_ el: AXUIElement) -> FieldKind { FieldClassifier.classify(hints(el)) }
+
+    static func isSearch(_ el: AXUIElement) -> Bool {
+        string(el, kAXRoleAttribute) == "AXSearchField" || string(el, kAXSubroleAttribute) == kAXSearchFieldSubrole
+    }
+
+    static func nextInput(after el: AXUIElement, levels: Int = 3) -> AXUIElement? {
+        var ancestor = element(el, kAXParentAttribute)
+        for _ in 0 ..< levels {
+            guard let a = ancestor else { return nil }
+            let inputs = collectInputs(a, limit: 200)
+            if let i = inputs.firstIndex(where: { CFEqual($0, el) }), i + 1 < inputs.count { return inputs[i + 1] }
+            ancestor = element(a, kAXParentAttribute)
+        }
+        return nil
+    }
+
+    static func formInputs(around el: AXUIElement, want: Int = 10) -> [AXUIElement] {
+        var best: [AXUIElement] = [el]
+        var ancestor = element(el, kAXParentAttribute)
+        for _ in 0 ..< 7 {
+            guard let a = ancestor else { break }
+            let inputs = collectInputs(a, limit: 1500)
+            if inputs.count > best.count { best = inputs }
+            if inputs.count >= want { break }
+            ancestor = element(a, kAXParentAttribute)
+        }
+        return best
     }
 
     static func collectInputs(_ root: AXUIElement, limit: Int = 800) -> [AXUIElement] {
@@ -60,3 +111,4 @@ enum AX {
         return out
     }
 }
+

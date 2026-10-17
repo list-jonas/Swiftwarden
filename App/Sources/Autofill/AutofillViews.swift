@@ -32,7 +32,7 @@ struct SuggestionView: View {
                             ItemIcon(cipher: c, size: 24)
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(c.displayName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                                Text(c.login?.username ?? "").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                                Text(c.type == .login ? (c.login?.username ?? "") : c.subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
                         }
@@ -90,10 +90,12 @@ struct QuickFillView: View {
     @State private var index = 0
     @FocusState private var focused: Bool
 
+    var pool: SidebarItem { target.kind.isCard ? .type(.card) : target.kind.isIdentity ? .type(.identity) : .type(.login) }
+
     var results: [Cipher] {
         guard model.phase == .unlocked else { return [] }
-        if query.isEmpty { return initial.isEmpty ? Array(model.items(for: .type(.login), query: "").prefix(8)) : initial }
-        return Array(model.items(for: .type(.login), query: query).prefix(8))
+        if query.isEmpty { return initial.isEmpty ? Array(model.items(for: pool, query: "").prefix(8)) : Array(initial.prefix(8)) }
+        return Array(model.items(for: pool, query: query).prefix(8))
     }
 
     var body: some View {
@@ -142,4 +144,5 @@ struct QuickFillView: View {
 extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }
+
 
