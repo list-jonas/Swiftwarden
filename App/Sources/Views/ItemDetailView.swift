@@ -85,14 +85,21 @@ struct ItemDetailView: View {
         }
     }
 
-    func copy(_ v: String?, _ label: String, secret: Bool = false) -> (() -> Void) {
-        { if secret { model.withReprompt(cipher) { model.copy(v, label) } } else { model.copy(v, label, sensitive: false) } }
+    func copier(_ v: String?, _ label: String, secret: Bool = false) -> (() -> Bool) {
+        {
+            if secret && cipher.needsReprompt && !model.repromptPassed.contains(cipher.id) {
+                model.withReprompt(cipher) { model.copy(v, label) }
+                return false
+            }
+            model.copy(v, label, sensitive: secret, toast: false)
+            return true
+        }
     }
 
     @ViewBuilder func row(_ label: String, _ value: String?, secret: Bool = false, copy: Bool = true) -> some View {
         if let value, !value.isEmpty {
             RowDivider()
-            DetailRow(label: label, action: copy ? self.copy(value, label.lowercased(), secret: secret) : nil) {
+            DetailRow(label: label, copy: copy ? copier(value, label.lowercased(), secret: secret) : nil) {
                 if secret { SecretValue(cipher: cipher, text: value) } else { Text(value).textSelection(.enabled).lineLimit(4) }
             }
         }
@@ -105,7 +112,7 @@ struct ItemDetailView: View {
             if cipher.canViewPassword { row("Password", cipher.login?.password, secret: true) }
             if let t = cipher.login?.totp, !t.isEmpty {
                 RowDivider()
-                DetailRow(label: "Code", action: { model.copy(TOTP(t)?.code(), "code") }) { TOTPView(secret: t) }
+                DetailRow(label: "Code", copy: copier(TOTP(t)?.code(), "code")) { TOTPView(secret: t) }
             }
             ForEach(Array((cipher.login?.fido2Credentials ?? []).enumerated()), id: \.offset) { _, p in
                 RowDivider()
@@ -116,7 +123,7 @@ struct ItemDetailView: View {
             ForEach(Array((cipher.login?.uris ?? []).enumerated()), id: \.offset) { i, u in
                 if let s = u.uri, !s.isEmpty {
                     RowDivider()
-                    DetailRow(label: i == 0 ? "Website" : "", action: { model.copy(s, "website", sensitive: false) }) {
+                    DetailRow(label: i == 0 ? "Website" : "", copy: copier(s, "website")) {
                         HStack(spacing: 6) {
                             Text(URLMatcher.host(of: s) ?? s).lineLimit(1)
                             if let url = URL(string: s.contains("://") ? s : "https://" + s), URLMatcher.host(of: s) != nil {
@@ -155,7 +162,7 @@ struct ItemDetailView: View {
         }
         ForEach(cipher.fields ?? []) { f in
             RowDivider()
-            DetailRow(label: f.name ?? "", action: f.type == .boolean || f.type == .linked ? nil : copy(f.value, f.name ?? "field", secret: f.type == .hidden)) {
+            DetailRow(label: f.name ?? "", copy: f.type == .boolean || f.type == .linked ? nil : copier(f.value, f.name ?? "field", secret: f.type == .hidden)) {
                 switch f.type {
                 case .hidden: SecretValue(cipher: cipher, text: f.value ?? "")
                 case .boolean: Image(systemName: f.value == "true" ? "checkmark.square.fill" : "square")
@@ -304,6 +311,20 @@ struct IssueCards: View {
         if h.unsecured.contains(cipher.id) {
             issue("lock.open.fill", .purple, "Unsecured Website", "A website uses http://. Update it to https:// if the site supports it.")
         }
+        if cipher.type == .login, cipher.canViewPassword, !(cipher.login?.password ?? "").isEmpty, !h.flagged(cipher.id), !cipher.isDeleted {
+            GroupCard {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "shield").font(.system(size: 26, weight: .light)).foregroundStyle(.secondary).frame(width: 34)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("No Issues Found").font(.system(size: 13, weight: .semibold))
+                        Text("This password doesn’t appear to contain words or patterns that may be obvious to an attacker, and you aren’t reusing it for other items in your vault." + (h.exposedChecked ? " It wasn’t found in known data breaches." : ""))
+                            .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+            }
+        }
     }
 
     func issue(_ symbol: String, _ color: Color, _ title: String, _ text: String) -> some View {
@@ -375,4 +396,5 @@ struct MoveToOrgSheet: View {
         .onAppear { org = model.organizations.first?.id ?? "" }
     }
 }
+
 

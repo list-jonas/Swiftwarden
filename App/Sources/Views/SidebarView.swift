@@ -10,21 +10,36 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
         List(selection: $model.sidebar) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                Tile(item: .all, symbol: "key.fill", color: .blue)
-                Tile(item: .favorites, symbol: "star.fill", color: .yellow)
-                Tile(item: .codes, symbol: "lock.rotation", color: .teal)
-                Tile(item: .passkeys, symbol: "person.badge.key.fill", color: .green)
-                Tile(item: .security, symbol: "exclamationmark", color: .red)
-                Tile(item: .trash, symbol: "trash.fill", color: .orange)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 9) {
+                Tile(item: .all, symbol: "key.fill", color: Palette.blue)
+                Tile(item: .favorites, symbol: "star.fill", color: Palette.yellow)
+                Tile(item: .codes, symbol: "lock.rotation", color: Palette.cyan)
+                Tile(item: .passkeys, symbol: "person.badge.key.fill", color: Palette.green)
+                Tile(item: .security, symbol: "exclamationmark", color: Palette.red)
+                Tile(item: .trash, symbol: "trash.fill", color: Palette.orange)
             }
             .padding(.vertical, 4)
             .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
             .selectionDisabled()
 
+            if !model.organizations.isEmpty {
+                Section("Vaults") {
+                    row("My Vault", symbol: "person.crop.circle", count: model.count(.personal)).tag(SidebarItem.personal)
+                    ForEach(model.organizations) { org in
+                        row(org.name ?? "Organization", symbol: "folder.badge.person.crop", count: model.count(.organization(org.id)))
+                            .tag(SidebarItem.organization(org.id))
+                        ForEach(model.collections.filter { $0.organizationId == org.id }) { c in
+                            row(c.name ?? "", symbol: "folder", count: model.count(.collection(c.id)))
+                                .padding(.leading, 18)
+                                .tag(SidebarItem.collection(c.id))
+                        }
+                    }
+                }
+            }
+
             Section("Types") {
                 ForEach(CipherType.allCases, id: \.self) { t in
-                    row(t.label + (t == .identity ? "" : ""), symbol: t.symbol, count: model.count(.type(t))).tag(SidebarItem.type(t))
+                    row(t.label, symbol: t.symbol, count: model.count(.type(t))).tag(SidebarItem.type(t))
                 }
             }
 
@@ -48,15 +63,6 @@ struct SidebarView: View {
                     Text("Folders")
                     Spacer()
                     Button { folderName = ""; newFolder = true } label: { Image(systemName: "plus") }.buttonStyle(.borderless).help("New Folder")
-                }
-            }
-
-            ForEach(model.organizations) { org in
-                Section(org.name ?? "Organization") {
-                    row("All Items", symbol: "building.2", count: model.count(.organization(org.id))).tag(SidebarItem.organization(org.id))
-                    ForEach(model.collections.filter { $0.organizationId == org.id }) { c in
-                        row(c.name ?? "", symbol: "folder.badge.person.crop", count: model.count(.collection(c.id))).tag(SidebarItem.collection(c.id))
-                    }
                 }
             }
 
@@ -102,26 +108,26 @@ struct Tile: View {
 
     var body: some View {
         let selected = model.sidebar == item
-        let count = item == .security ? model.health.flaggedCount : model.count(item)
         Button { model.sidebar = item; model.selectedId = nil } label: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .top) {
                     Image(systemName: symbol)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(selected ? color : .white)
-                        .frame(width: 26, height: 26)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(selected ? Palette.blue : .white)
+                        .frame(width: 24, height: 24)
                         .background(Circle().fill(selected ? Color.white : color))
                     Spacer()
-                    Text("\(count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(selected ? Color.white.opacity(0.9) : .secondary)
+                    Text("\(model.count(item))").font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(selected ? Color.white : Color.secondary)
                 }
                 Text(item.title).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(selected ? .white : .primary)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+                    .lineLimit(1)
             }
-            .padding(9)
+            .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(selected ? Color.accentColor : Color.primary.opacity(0.07)))
-            .contentShape(Rectangle())
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(selected ? Palette.blue : Palette.tile))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -145,3 +151,4 @@ struct SyncFooter: View {
         .onTapGesture { Task { await model.sync() } }
     }
 }
+

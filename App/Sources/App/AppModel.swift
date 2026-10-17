@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
     case folder(String?)
     case collection(String)
     case organization(String)
+    case personal
     case sends, generator
 
     var title: String {
@@ -20,10 +21,11 @@ enum SidebarItem: Hashable {
         case .passkeys: "Passkeys"
         case .security: "Security"
         case .trash: "Deleted"
-        case let .type(t): t.label + "s"
+        case let .type(t): ["Logins", "Secure Notes", "Cards", "Identities", "SSH Keys"][t.rawValue - 1]
         case .folder: "Folder"
         case .collection: "Collection"
         case .organization: "Organization"
+        case .personal: "My Vault"
         case .sends: "Send"
         case .generator: "Generator"
         }
@@ -373,7 +375,7 @@ final class AppModel {
 
     // MARK: Queries
 
-    func items(for s: SidebarItem?, query: String? = nil) -> [Cipher] {
+    func items(for s: SidebarItem?, query: String? = nil, sorted: Bool = true) -> [Cipher] {
         let q = (query ?? search).trimmingCharacters(in: .whitespaces).lowercased()
         var out: [Cipher]
         switch s ?? .all {
@@ -390,6 +392,7 @@ final class AppModel {
                 case let .folder(id): return c.folderId == id
                 case let .collection(id): return c.collectionIds?.contains(id) ?? false
                 case let .organization(id): return c.organizationId == id
+                case .personal: return c.organizationId == nil
                 default: return true
                 }
             }
@@ -398,6 +401,7 @@ final class AppModel {
             let terms = q.split(separator: " ")
             out = out.filter { c in let s = searchIndex[c.id] ?? ""; return terms.allSatisfy { s.contains($0) } }
         }
+        guard sorted else { return out }
         switch sort {
         case .name: out.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         case .modified: out.sort { ($0.revisionDate ?? "") > ($1.revisionDate ?? "") }
@@ -406,7 +410,7 @@ final class AppModel {
         return out
     }
 
-    func count(_ s: SidebarItem) -> Int { items(for: s, query: "").count }
+    func count(_ s: SidebarItem) -> Int { items(for: s, query: "", sorted: false).count }
 
     func cipher(_ id: String?) -> Cipher? { id.flatMap { i in ciphers.first { $0.id == i } } }
     func folderName(_ id: String?) -> String? { id.flatMap { i in folders.first { $0.id == i }?.name } }
@@ -493,13 +497,13 @@ final class AppModel {
 
     // MARK: Clipboard
 
-    func copy(_ s: String?, _ label: String, sensitive: Bool = true) {
+    func copy(_ s: String?, _ label: String, sensitive: Bool = true, toast: Bool = true) {
         guard let s, !s.isEmpty else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(s, forType: .string)
         if sensitive { pb.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) }
-        showToast("Copied \(label)")
+        if toast { showToast("Copied \(label)") }
         let secs = Prefs.d.integer(forKey: Prefs.clearClipboard)
         clipboardTask?.cancel()
         guard sensitive, secs > 0 else { return }
@@ -565,6 +569,9 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
+
+
 
 
 
