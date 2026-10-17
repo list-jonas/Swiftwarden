@@ -1,9 +1,8 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import Carbon.HIToolbox
 import SwiftUI
 import SwiftwardenCore
-
 struct FillTarget {
     let app: NSRunningApplication
     let element: AXUIElement
@@ -48,6 +47,10 @@ final class AutofillController {
             MainActor.assumeIsolated { AutofillController.shared.attach(app) }
         }
         registerHotKey()
+        if enabled, !trusted, !Prefs.d.bool(forKey: "axPrompted") {
+            Prefs.d.set(true, forKey: "axPrompted")
+            requestPermission()
+        }
         attach(NSWorkspace.shared.frontmostApplication)
         Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
             MainActor.assumeIsolated {
@@ -275,7 +278,7 @@ enum Filler {
                 e?.keyboardSetUnicodeString(stringLength: u.count, unicodeString: u)
                 e?.post(tap: .cghidEventTap)
             }
-            usleep(4000)
+            usleep(6000)
         }
     }
 
@@ -303,6 +306,10 @@ enum Filler {
             key(UInt16(kVK_ANSI_A), flags: .maskCommand)
             key(UInt16(kVK_Delete))
             type(text)
+        }
+        usleep(250_000)
+        if !AX.isSecure(el), let v = AX.string(el, kAXValueAttribute), v != text {
+            AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
         }
     }
 }
@@ -341,4 +348,11 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
+
+
+
+
+
+
 

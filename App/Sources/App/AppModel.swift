@@ -52,7 +52,9 @@ struct Toast: Equatable { var text: String; var id = UUID() }
 final class AppModel {
     static let shared = AppModel()
 
-    var phase: Phase = .loggedOut
+    var phase: Phase = .loggedOut {
+        didSet { if oldValue != phase { DispatchQueue.main.async { AutofillController.shared.focusChanged() } } }
+    }
     var account: StoredAccount?
     @ObservationIgnored var service: VaultService?
 
@@ -563,4 +565,6 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
+
 

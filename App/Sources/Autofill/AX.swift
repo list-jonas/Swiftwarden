@@ -1,5 +1,5 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 
 enum AX {
     static func raw(_ el: AXUIElement, _ name: String) -> CFTypeRef? {

@@ -3,7 +3,22 @@ import Foundation
 import XCTest
 
 final class SeedTests: XCTestCase {
+    func testSeedLocalLogin() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let email = env["SW_SEED_EMAIL"], let pw = env["SW_SEED_PASSWORD"], env["SW_SEED_LOCAL"] != nil else { throw XCTSkip("seed off") }
+        let api = APIClient(env: .selfHosted(env["SW_IT_SERVER"] ?? "http://localhost:8787"), deviceId: UUID().uuidString)
+        let s = try await VaultService.login(api: api, email: email, password: pw, kdf: try await api.prelogin(email: email).config)
+        let svc = VaultService(api: api, keys: KeyRing(userKey: s.userKey))
+        _ = try svc.decryptVault(try await svc.fetchSync())
+        var c = Cipher(type: .login)
+        c.name = "Local Test Site"; c.login?.username = "tester@example.com"; c.login?.password = "Test-Pa55-word!"
+        c.login?.uris = [LoginUri(uri: "http://localhost:8899")]
+        c.login?.totp = "JBSWY3DPEHPK3PXP"
+        _ = try await svc.save(c)
+    }
+
     func testSeedDemoVault() async throws {
+        guard ProcessInfo.processInfo.environment["SW_SEED_LOCAL"] == nil else { throw XCTSkip("local only") }
         let env = ProcessInfo.processInfo.environment
         guard let email = env["SW_SEED_EMAIL"], let pw = env["SW_SEED_PASSWORD"] else { throw XCTSkip("seed off") }
         let api = APIClient(env: .selfHosted(env["SW_IT_SERVER"] ?? "http://localhost:8787"), deviceId: UUID().uuidString)
@@ -62,3 +77,4 @@ final class SeedTests: XCTestCase {
         _ = try await svc.save(ssh)
     }
 }
+
