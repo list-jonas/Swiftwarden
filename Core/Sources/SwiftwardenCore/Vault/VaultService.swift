@@ -224,7 +224,7 @@ public final class VaultService: @unchecked Sendable {
     public func decryptVault(_ data: Data) throws -> DecryptedVault {
         let s = try JSON.decoder.decode(SyncResponse.self, from: data)
         loadKeys(profile: s.profile, encryptedPrivateKey: nil)
-        let ciphers = (s.ciphers ?? []).map(decrypt)
+        let ciphers = decryptAll(s.ciphers ?? [])
         let folders = (s.folders ?? []).map { f in var x = f; x.name = dec(f.name, keys.userKey); return x }
         let cols = (s.collections ?? []).map { c in
             var x = c
@@ -235,6 +235,22 @@ public final class VaultService: @unchecked Sendable {
         return DecryptedVault(profile: s.profile, ciphers: ciphers, folders: folders.sorted { ($0.name ?? "").localizedStandardCompare($1.name ?? "") == .orderedAscending },
                               collections: cols.sorted { ($0.name ?? "").localizedStandardCompare($1.name ?? "") == .orderedAscending },
                               sends: sends, organizations: s.profile.organizations ?? [], policies: s.policies ?? [])
+    }
+
+    public func decryptAll(_ list: [Cipher]) -> [Cipher] {
+        guard list.count > 64 else { return list.map(decrypt) }
+        let out = UnsafeMutableBufferPointer<Cipher?>.allocate(capacity: list.count)
+        out.initialize(repeating: nil)
+        defer { out.deallocate() }
+        let chunks = min(ProcessInfo.processInfo.activeProcessorCount * 2, list.count)
+        let size = (list.count + chunks - 1) / chunks
+        let box = UncheckedBox(out)
+        DispatchQueue.concurrentPerform(iterations: chunks) { c in
+            let lo = c * size, hi = min(lo + size, list.count)
+            guard lo < hi else { return }
+            for i in lo ..< hi { box.value[i] = decrypt(list[i]) }
+        }
+        return out.map { $0! }
     }
 
     func dec(_ s: String?, _ key: SymmetricCryptoKey) -> String? {
@@ -439,6 +455,11 @@ public final class VaultService: @unchecked Sendable {
     }
 }
 
+struct UncheckedBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ v: T) { value = v }
+}
+
 public extension Cipher {
     mutating func recordHistory(from old: Cipher?) {
         guard let old, type == .login else { return }
@@ -457,4 +478,5 @@ public extension Cipher {
         passwordHistory = Array(hist.prefix(5))
     }
 }
+
 

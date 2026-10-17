@@ -26,7 +26,9 @@ struct ItemListView: View {
         .contextMenu(forSelectionType: String.self) { ids in
             if let c = model.cipher(ids.first) { ItemMenu(cipher: c) }
         } primaryAction: { ids in
-            if let c = model.cipher(ids.first), c.type == .login { model.copy(c.login?.password, "password") }
+            guard let c = model.cipher(ids.first) else { return }
+            if model.sidebar == .codes, let t = c.login?.totp { model.copy(TOTP(t)?.code(), "code") }
+            else if c.type == .login { model.copy(c.login?.password, "password") }
         }
         .onChange(of: model.selectedId) { _, _ in model.draft = nil }
         .overlay {
@@ -35,9 +37,12 @@ struct ItemListView: View {
             }
         }
         .navigationTitle(title)
-        .navigationSubtitle("\(items.count) Items")
+        .navigationSubtitle(model.sidebar == .codes ? "\(items.count) Verification Code\(items.count == 1 ? "" : "s")" : "\(items.count) Items")
         .toolbar {
             ToolbarItemGroup {
+                if model.sidebar == .codes {
+                    CountdownRing().help("Codes refresh every 30 seconds")
+                } else {
                 Menu {
                     Picker("Sort By", selection: $model.sort) {
                         ForEach(SortOrder.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -45,6 +50,7 @@ struct ItemListView: View {
                     .pickerStyle(.inline)
                 } label: { Image(systemName: "arrow.up.arrow.down") }
                     .help("Sort")
+                }
                 if model.sidebar == .trash {
                     Button { model.emptyTrash() } label: { Image(systemName: "trash.slash") }.help("Empty Trash").disabled(items.isEmpty)
                 } else {
@@ -116,6 +122,23 @@ struct SecurityHeader: View {
     }
 }
 
+struct CountdownRing: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+            let rem = 30 - Int(ctx.date.timeIntervalSince1970) % 30
+            ZStack {
+                Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 3)
+                Circle().trim(from: 0, to: CGFloat(rem) / 30)
+                    .stroke(rem <= 5 ? Palette.red : Palette.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 1), value: rem)
+            }
+            .frame(width: 18, height: 18)
+            .padding(.horizontal, 4)
+        }
+    }
+}
+
 struct ItemRow: View {
     @Environment(AppModel.self) private var model
     let cipher: Cipher
@@ -128,7 +151,14 @@ struct ItemRow: View {
                 Text(cipher.subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if model.health.exposed[cipher.id] != nil {
+            if model.sidebar == .codes, let t = cipher.login?.totp {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    Text(TOTP(t).map { TOTPView.format($0.code(at: ctx.date)) } ?? "—")
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+            } else if model.health.exposed[cipher.id] != nil {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.white, .red).font(.system(size: 17))
             } else if model.health.flagged(cipher.id) {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.primary, Color.primary.opacity(0.15)).font(.system(size: 17))
@@ -205,5 +235,6 @@ struct PendingReprompt: Identifiable {
     let id: String
     let action: () -> Void
 }
+
 
 

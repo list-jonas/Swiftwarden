@@ -28,9 +28,10 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(min: 360, ideal: 560)
         }
-        .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
+        .searchable(text: $model.search, placement: .toolbar, prompt: Text(model.sidebar == .codes ? "Search Codes" : "Search"))
     }
 }
+
 
 
 

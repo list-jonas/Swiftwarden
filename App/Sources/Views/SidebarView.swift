@@ -113,7 +113,7 @@ struct Tile: View {
                 HStack(alignment: .top) {
                     Image(systemName: symbol)
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(selected ? Palette.blue : .white)
+                        .foregroundStyle(selected ? color : .white)
                         .frame(width: 24, height: 24)
                         .background(Circle().fill(selected ? Color.white : color))
                     Spacer()
@@ -126,7 +126,7 @@ struct Tile: View {
             }
             .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(selected ? Palette.blue : Palette.tile))
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(selected ? color : Palette.tile))
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -151,4 +151,5 @@ struct SyncFooter: View {
         .onTapGesture { Task { await model.sync() } }
     }
 }
+
 

@@ -29,6 +29,13 @@ final class AutofillController {
     private var hotKey: HotKey?
     private var started = false
 
+    static let chromiumBrowsers: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary", "org.chromium.Chromium",
+        "com.brave.Browser", "com.brave.Browser.beta", "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "company.thebrowser.Browser",
+        "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "com.operasoftware.OperaGX", "app.zen-browser.zen", "com.openai.atlas",
+        "ai.perplexity.comet", "com.sigmaos.sigmaos.macos", "com.kagi.kagimacOS",
+    ]
+
     static let userHints = ["user", "email", "e-mail", "login", "account", "benutzer", "anmelde", "konto", "identifier", "mail"]
 
     var trusted: Bool { AXIsProcessTrusted() }
@@ -52,10 +59,14 @@ final class AutofillController {
             requestPermission()
         }
         attach(NSWorkspace.shared.frontmostApplication)
-        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                let s = AutofillController.shared
-                if s.observer == nil, s.trusted { s.attach(NSWorkspace.shared.frontmostApplication) }
+        if !trusted {
+            Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { timer in
+                MainActor.assumeIsolated {
+                    let s = AutofillController.shared
+                    guard s.trusted else { return }
+                    timer.invalidate()
+                    s.attach(NSWorkspace.shared.frontmostApplication)
+                }
             }
         }
     }
@@ -85,7 +96,9 @@ final class AutofillController {
         guard enabled, trusted, let app, app.processIdentifier != getpid() else { return }
         let pid = app.processIdentifier
         let appEl = AXUIElementCreateApplication(pid)
-        AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if Self.chromiumBrowsers.contains(app.bundleIdentifier ?? "") {
+            AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
         var obs: AXObserver?
         let cb: AXObserverCallback = { _, _, _, _ in
             MainActor.assumeIsolated { AutofillController.shared.focusChanged() }
@@ -348,6 +361,7 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
 
 
 

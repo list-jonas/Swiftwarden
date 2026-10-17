@@ -89,6 +89,8 @@ public enum PasswordStrength {
         "computer", "internet", "test", "guest", "changeme", "default", "pass", "user", "love", "money", "lovely", "family",
     ]
 
+    static let wordSet = Set(Fingerprint.wordlist)
+
     static let sequences = ["abcdefghijklmnopqrstuvwxyz", "01234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"]
 
     public static func score(_ pw: String, userInputs: [String] = []) -> Int {
@@ -121,8 +123,7 @@ public enum PasswordStrength {
             i += step
         }
         var bits = effective * log2(Double(max(pool, 10)))
-        let words = Set(Fingerprint.wordlist)
-        if core.count >= 3, words.contains(core) || common.contains(where: { core.hasPrefix($0) && $0.count >= 4 }) {
+        if core.count >= 3, wordSet.contains(core) || common.contains(where: { core.hasPrefix($0) && $0.count >= 4 }) {
             bits = min(bits, 12 + Double(pw.count - core.count) * 3.3)
         }
         for u in userInputs where u.count >= 3 && lower.contains(u.lowercased()) { bits -= Double(u.count) * 3 }
@@ -137,3 +138,4 @@ public enum PasswordStrength {
 
     public static func isWeak(_ pw: String, userInputs: [String] = []) -> Bool { score(pw, userInputs: userInputs) <= 2 }
 }
+

@@ -60,14 +60,22 @@ final class AppModel {
     var account: StoredAccount?
     @ObservationIgnored var service: VaultService?
 
-    var ciphers: [Cipher] = []
+    var ciphers: [Cipher] = [] {
+        didSet { dataVersion &+= 1; recount() }
+    }
+    var counts: [SidebarItem: Int] = [:]
+    @ObservationIgnored private var dataVersion = 0
+    @ObservationIgnored private var baseCache: (key: String, items: [Cipher])?
+    @ObservationIgnored private var lastRevision: Double?
     var folders: [Folder] = []
     var collections: [Collection] = []
     var organizations: [ProfileOrganization] = []
     var sends: [Send] = []
     var profile: Profile?
     var policies: [Policy] = []
-    var health = HealthReport()
+    var health = HealthReport() {
+        didSet { dataVersion &+= 1; recount() }
+    }
     @ObservationIgnored var searchIndex: [String: String] = [:]
 
     var syncing = false
@@ -231,7 +239,7 @@ final class AppModel {
     private func clearVault() {
         service = nil
         ciphers = []; folders = []; collections = []; organizations = []; sends = []; profile = nil
-        searchIndex = [:]; health = HealthReport(); draft = nil; selectedId = nil; repromptPassed = []
+        searchIndex = [:]; health = HealthReport(); lastRevision = nil; draft = nil; selectedId = nil; repromptPassed = []
         generatorHistory = []
     }
 
@@ -294,6 +302,7 @@ final class AppModel {
             try? data.write(to: Paths.syncCache, options: .atomic)
             await apply(data)
             account?.lastSync = Date()
+            lastRevision = try? await svc.revisionDate()
             if let p = profile, let k = p.key, account?.protectedUserKey != k { account?.protectedUserKey = k }
             Store.save(account)
             errorMessage = nil
@@ -302,6 +311,12 @@ final class AppModel {
         } catch {
             errorMessage = "Sync failed: \(error.localizedDescription)"
         }
+    }
+
+    func syncIfChanged() async {
+        guard let svc = service, !syncing else { return }
+        if let rev = try? await svc.revisionDate(), let last = lastRevision, rev == last { return }
+        await sync()
     }
 
     func apply(_ data: Data) async {
@@ -375,8 +390,44 @@ final class AppModel {
 
     // MARK: Queries
 
+    private func recount() {
+        var c: [SidebarItem: Int] = [:]
+        let h = health
+        for x in ciphers {
+            if x.isDeleted { c[.trash, default: 0] += 1; continue }
+            c[.all, default: 0] += 1
+            if x.isFavorite { c[.favorites, default: 0] += 1 }
+            if x.hasTotp { c[.codes, default: 0] += 1 }
+            if x.hasPasskey { c[.passkeys, default: 0] += 1 }
+            if h.flagged(x.id) { c[.security, default: 0] += 1 }
+            c[.type(x.type), default: 0] += 1
+            c[.folder(x.folderId), default: 0] += 1
+            for col in x.collectionIds ?? [] { c[.collection(col), default: 0] += 1 }
+            if let o = x.organizationId { c[.organization(o), default: 0] += 1 } else { c[.personal, default: 0] += 1 }
+        }
+        counts = c
+    }
+
     func items(for s: SidebarItem?, query: String? = nil, sorted: Bool = true) -> [Cipher] {
         let q = (query ?? search).trimmingCharacters(in: .whitespaces).lowercased()
+        _ = ciphers.count
+        _ = health.exposedChecked
+        let key = "(String(describing: s))|(sort.rawValue)|(dataVersion)"
+        var out: [Cipher]
+        if let c = baseCache, c.key == key {
+            out = c.items
+        } else {
+            out = baseItems(for: s)
+            baseCache = (key, out)
+        }
+        if !q.isEmpty {
+            let terms = q.split(separator: " ")
+            out = out.filter { c in let s = searchIndex[c.id] ?? ""; return terms.allSatisfy { s.contains($0) } }
+        }
+        return out
+    }
+
+    private func baseItems(for s: SidebarItem?) -> [Cipher] {
         var out: [Cipher]
         switch s ?? .all {
         case .trash: out = ciphers.filter(\.isDeleted)
@@ -397,11 +448,6 @@ final class AppModel {
                 }
             }
         }
-        if !q.isEmpty {
-            let terms = q.split(separator: " ")
-            out = out.filter { c in let s = searchIndex[c.id] ?? ""; return terms.allSatisfy { s.contains($0) } }
-        }
-        guard sorted else { return out }
         switch sort {
         case .name: out.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         case .modified: out.sort { ($0.revisionDate ?? "") > ($1.revisionDate ?? "") }
@@ -410,7 +456,7 @@ final class AppModel {
         return out
     }
 
-    func count(_ s: SidebarItem) -> Int { items(for: s, query: "", sorted: false).count }
+    func count(_ s: SidebarItem) -> Int { counts[s] ?? 0 }
 
     func cipher(_ id: String?) -> Cipher? { id.flatMap { i in ciphers.first { $0.id == i } } }
     func folderName(_ id: String?) -> String? { id.flatMap { i in folders.first { $0.id == i }?.name } }
@@ -545,13 +591,18 @@ final class AppModel {
     // MARK: Auto-lock
 
     private func startTimers() {
-        let t = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
+        let t = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
             MainActor.assumeIsolated { AppModel.shared.checkIdle() }
         }
-        let s = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in
-            MainActor.assumeIsolated { _ = Task { await AppModel.shared.sync() } }
+        t.tolerance = 10
+        let s = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
+            MainActor.assumeIsolated { _ = Task { await AppModel.shared.syncIfChanged() } }
         }
+        s.tolerance = 60
         timers = [t, s]
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { _ = Task { await AppModel.shared.syncIfChanged() } }
+        }
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { if Prefs.d.bool(forKey: Prefs.lockOnSleep) { AppModel.shared.lock() } }
@@ -569,6 +620,7 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
 
 
 

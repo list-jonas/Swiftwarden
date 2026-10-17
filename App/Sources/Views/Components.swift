@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import ImageIO
 import SwiftUI
 import SwiftwardenCore
 
@@ -22,42 +23,85 @@ enum Palette {
     static let pill = dynamic(dark: NSColor(white: 1, alpha: 0.1), light: NSColor(white: 0, alpha: 0.07))
 }
 
-struct IconEntry: @unchecked Sendable {
+final class IconEntry: @unchecked Sendable {
     let image: NSImage
     let tint: NSColor
+    init(image: NSImage, tint: NSColor) { self.image = image; self.tint = tint }
+}
+
+enum IconMemory {
+    nonisolated(unsafe) static let cache: NSCache<NSString, IconEntry> = {
+        let c = NSCache<NSString, IconEntry>()
+        c.countLimit = 2000
+        return c
+    }()
+
+    static func get(_ host: String?) -> IconEntry? { host.flatMap { cache.object(forKey: $0 as NSString) } }
 }
 
 actor IconStore {
     static let shared = IconStore()
-    private var mem: [String: IconEntry] = [:]
     private var missing: Set<String> = []
     private var inflight: [String: Task<IconEntry?, Never>] = [:]
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private let session: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpMaximumConnectionsPerHost = 6
+        c.timeoutIntervalForRequest = 15
+        return URLSession(configuration: c)
+    }()
+
+    private func acquire() async {
+        if running < 6 { running += 1; return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    private func release() {
+        if waiters.isEmpty { running -= 1 } else { waiters.removeFirst().resume() }
+    }
 
     func icon(_ host: String, base: String) async -> IconEntry? {
-        if let i = mem[host] { return i }
+        if let i = IconMemory.get(host) { return i }
         if missing.contains(host) { return nil }
         if let t = inflight[host] { return await t.value }
         let file = Paths.caches.appendingPathComponent("icons/\(host).png")
-        let t = Task<IconEntry?, Never> {
+        let session = self.session
+        let t = Task<IconEntry?, Never>(priority: .utility) {
             var data = try? Data(contentsOf: file)
-            if data == nil, let url = URL(string: "\(base)/\(host)/icon.png"),
-               let (d, r) = try? await URLSession.shared.data(from: url), (r as? HTTPURLResponse)?.statusCode == 200 {
-                try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? d.write(to: file)
-                data = d
+            if data == nil, let url = URL(string: "\(base)/\(host)/icon.png") {
+                await self.acquire()
+                if let (d, r) = try? await session.data(from: url), (r as? HTTPURLResponse)?.statusCode == 200 {
+                    try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? d.write(to: file)
+                    data = d
+                } else {
+                    data = Data()
+                }
+                await self.release()
             }
             guard let data, !data.isEmpty, !Self.fallbackHashes.contains(Data(SHA256.hash(data: data)).hex),
-                  let i = NSImage(data: data), let rep = i.representations.first, rep.pixelsWide >= 24 || i.size.width >= 24 else {
+                  let thumb = Self.thumbnail(data) else {
                 try? Data().write(to: file)
                 return nil
             }
-            return IconEntry(image: i, tint: Self.tint(of: i))
+            return IconEntry(image: thumb, tint: Self.tint(of: thumb))
         }
         inflight[host] = t
         let i = await t.value
         inflight[host] = nil
-        if let i { mem[host] = i } else { missing.insert(host) }
+        if let i { IconMemory.cache.setObject(i, forKey: host as NSString) } else { missing.insert(host) }
         return i
+    }
+
+    static func thumbnail(_ data: Data) -> NSImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int, w >= 24 else { return nil }
+        let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 128,
+                                     kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
     static let fallbackHashes: Set<String> = [
@@ -107,6 +151,12 @@ struct ItemIcon: View {
     @AppStorage(Prefs.showIcons) private var showIcons = true
     @State private var icon: IconEntry?
 
+    init(cipher: Cipher, size: CGFloat = 32) {
+        self.cipher = cipher
+        self.size = size
+        _icon = State(initialValue: cipher.type == .login ? IconMemory.get(cipher.primaryHost) : nil)
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             content
@@ -123,9 +173,11 @@ struct ItemIcon: View {
             }
         }
         .task(id: cipher.id + "|" + (cipher.primaryHost ?? "")) {
+            guard showIcons, cipher.type == .login, let h = cipher.primaryHost, let base = AppModel.shared.account?.env.iconsURL else { icon = nil; return }
+            if let m = IconMemory.get(h) { icon = m; return }
             icon = nil
-            guard showIcons, cipher.type == .login, let h = cipher.primaryHost, let base = AppModel.shared.account?.env.iconsURL else { return }
-            icon = await IconStore.shared.icon(h, base: base)
+            let fetched = await IconStore.shared.icon(h, base: base)
+            if !Task.isCancelled { icon = fetched }
         }
     }
 
@@ -326,6 +378,7 @@ func revealInFinderSave(_ data: Data, name: String) {
     p.nameFieldStringValue = name
     if p.runModal() == .OK, let u = p.url { try? data.write(to: u) }
 }
+
 
 
 

@@ -12,6 +12,16 @@ struct ItemDetailContainer: View {
                 ItemEditView(c: Binding(get: { model.draft ?? Cipher() }, set: { model.draft = $0 }))
             } else if let c = model.cipher(model.selectedId) {
                 ItemDetailView(cipher: c)
+            } else if model.sidebar == .codes {
+                ContentUnavailableView {
+                    Label("No Verification Code Selected", systemImage: "lock.badge.clock.fill")
+                } description: {
+                    Text("Verification codes provide an extra layer of security to help keep your accounts safe.")
+                } actions: {
+                    Button("More About Verification Codes") {
+                        NSWorkspace.shared.open(URL(string: "https://bitwarden.com/help/integrated-authenticator/")!)
+                    }
+                }
             } else {
                 ContentUnavailableView("No Item Selected", systemImage: "key.viewfinder")
             }
@@ -396,6 +406,7 @@ struct MoveToOrgSheet: View {
         .onAppear { org = model.organizations.first?.id ?? "" }
     }
 }
+
 
 
 
