@@ -34,7 +34,8 @@ struct MainView: View {
                 }
             }
         }
-        .searchable(text: $model.search, placement: .toolbar, prompt: Text(model.sidebar == .codes ? "Search Codes" : "Search"))
+        .searchable(text: $model.search, placement: .toolbar, prompt: Text(model.sidebar == .codes ? "Search Codes" : model.sidebar == .security ? "Search Security" : "Search"))
     }
 }
+
 

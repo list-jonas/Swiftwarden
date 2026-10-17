@@ -48,6 +48,30 @@ struct HealthReport {
     var flaggedCount: Int { Set(weak).union(reused.keys).union(exposed.keys).union(unsecured).count }
 }
 
+enum SecurityIssue: Hashable {
+    case exposed(Int), reused(Int), weak, unsecured
+
+    var rank: Int {
+        switch self {
+        case .exposed: 0
+        case .reused: 1
+        case .weak: 2
+        case .unsecured: 3
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .exposed: "Compromised password"
+        case .reused: "Reused password"
+        case .weak: "Easily guessed password"
+        case .unsecured: "Unsecured website"
+        }
+    }
+
+    var isSevere: Bool { rank == 0 || rank == 2 }
+}
+
 struct Toast: Equatable { var text: String; var id = UUID() }
 
 @MainActor @Observable
@@ -64,6 +88,13 @@ final class AppModel {
         didSet { dataVersion &+= 1; recount() }
     }
     var counts: [SidebarItem: Int] = [:]
+    var hiddenWarnings: Set<String> = [] {
+        didSet { dataVersion &+= 1; recount() }
+    }
+    var showHiddenWarnings = false {
+        didSet { dataVersion &+= 1 }
+    }
+    var checkingExposed = false
     @ObservationIgnored private var dataVersion = 0
     @ObservationIgnored private var baseCache: (key: String, items: [Cipher])?
     @ObservationIgnored private var lastRevision: Double?
@@ -330,6 +361,7 @@ final class AppModel {
         guard let v = try? await Task.detached(priority: .userInitiated, operation: { try svc.decryptVault(data) }).value else { return }
         guard service === svc else { return }
         profile = v.profile
+        if let uid = account?.userId { hiddenWarnings = Set(Prefs.d.stringArray(forKey: "hiddenWarnings.\(uid)") ?? []) }
         ciphers = v.ciphers
         folders = v.folders
         collections = v.collections
@@ -377,26 +409,64 @@ final class AppModel {
     }
 
     func checkExposed() async {
+        guard !checkingExposed else { return }
+        checkingExposed = true
+        defer { checkingExposed = false }
         let items = ciphers.filter { !$0.isDeleted && $0.type == .login && !($0.login?.password ?? "").isEmpty }
-        var cache: [String: Int] = [:]
-        var result: [String: Int] = [:]
-        for c in items {
-            let pw = c.login!.password!
-            if let n = cache[pw] { if n > 0 { result[c.id] = n }; continue }
-            let hash = Primitives.sha1(Data(pw.utf8)).hex.uppercased()
-            let prefix = String(hash.prefix(5)), suffix = hash.dropFirst(5)
-            guard let url = URL(string: "https://api.pwnedpasswords.com/range/\(prefix)"),
-                  let (d, _) = try? await URLSession.shared.data(from: url), let body = String(data: d, encoding: .utf8) else { continue }
-            var n = 0
-            for line in body.split(whereSeparator: \.isNewline) where line.hasPrefix(suffix) {
-                n = Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+        let passwords = Array(Set(items.compactMap { $0.login?.password }))
+        var counts: [String: Int] = [:]
+        await withTaskGroup(of: (String, Int?).self) { group in
+            var it = passwords.makeIterator()
+            func next() -> Bool {
+                guard let pw = it.next() else { return false }
+                group.addTask { (pw, await Self.pwnedCount(pw)) }
+                return true
             }
-            cache[pw] = n
-            if n > 0 { result[c.id] = n }
+            for _ in 0 ..< 8 where next() {}
+            while let (pw, n) = await group.next() {
+                if let n { counts[pw] = n }
+                _ = next()
+            }
         }
+        var result: [String: Int] = [:]
+        for c in items { if let n = counts[c.login!.password!], n > 0 { result[c.id] = n } }
         health.exposed = result
         health.exposedChecked = true
     }
+
+    nonisolated static func pwnedCount(_ pw: String) async -> Int? {
+        let hash = Primitives.sha1(Data(pw.utf8)).hex.uppercased()
+        let prefix = String(hash.prefix(5)), suffix = hash.dropFirst(5)
+        guard let url = URL(string: "https://api.pwnedpasswords.com/range/\(prefix)"),
+              let (d, _) = try? await URLSession.shared.data(from: url), let body = String(data: d, encoding: .utf8) else { return nil }
+        for line in body.split(whereSeparator: \.isNewline) where line.hasPrefix(suffix) {
+            return Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+        }
+        return 0
+    }
+
+    func issues(_ c: Cipher) -> [SecurityIssue] {
+        var out: [SecurityIssue] = []
+        if let n = health.exposed[c.id] { out.append(.exposed(n)) }
+        if let n = health.reused[c.id] { out.append(.reused(n)) }
+        if health.weak.contains(c.id) { out.append(.weak) }
+        if health.unsecured.contains(c.id) { out.append(.unsecured) }
+        return out
+    }
+
+    func reusedWith(_ c: Cipher) -> [Cipher] {
+        guard let pw = c.login?.password, !pw.isEmpty else { return [] }
+        return ciphers.filter { $0.id != c.id && !$0.isDeleted && $0.login?.password == pw }
+    }
+
+    func isHidden(_ id: String) -> Bool { hiddenWarnings.contains(id) }
+
+    func setHidden(_ id: String, _ hidden: Bool) {
+        if hidden { hiddenWarnings.insert(id) } else { hiddenWarnings.remove(id) }
+        if let uid = account?.userId { Prefs.d.set(Array(hiddenWarnings), forKey: "hiddenWarnings.\(uid)") }
+    }
+
+    var hiddenFlaggedCount: Int { ciphers.filter { !$0.isDeleted && hiddenWarnings.contains($0.id) && health.flagged($0.id) }.count }
 
     // MARK: Queries
 
@@ -409,7 +479,7 @@ final class AppModel {
             if x.isFavorite { c[.favorites, default: 0] += 1 }
             if x.hasTotp { c[.codes, default: 0] += 1 }
             if x.hasPasskey { c[.passkeys, default: 0] += 1 }
-            if h.flagged(x.id) { c[.security, default: 0] += 1 }
+            if h.flagged(x.id) && !hiddenWarnings.contains(x.id) { c[.security, default: 0] += 1 }
             c[.type(x.type), default: 0] += 1
             c[.folder(x.folderId), default: 0] += 1
             for col in x.collectionIds ?? [] { c[.collection(col), default: 0] += 1 }
@@ -448,7 +518,7 @@ final class AppModel {
                 case .favorites: return c.isFavorite
                 case .codes: return c.hasTotp
                 case .passkeys: return c.hasPasskey
-                case .security: return health.flagged(c.id)
+                case .security: return health.flagged(c.id) && (showHiddenWarnings || !hiddenWarnings.contains(c.id))
                 case let .type(t): return c.type == t
                 case let .folder(id): return c.folderId == id
                 case let .collection(id): return c.collectionIds?.contains(id) ?? false
@@ -462,6 +532,20 @@ final class AppModel {
         case .name: out.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         case .modified: out.sort { ($0.revisionDate ?? "") > ($1.revisionDate ?? "") }
         case .created: out.sort { ($0.creationDate ?? "") > ($1.creationDate ?? "") }
+        }
+        if s == .security {
+            let rank = Dictionary(uniqueKeysWithValues: out.map { ($0.id, issues($0).map(\.rank).min() ?? 9) })
+            let pos = Dictionary(uniqueKeysWithValues: out.enumerated().map { ($1.id, $0) })
+            var groupStart: [String: Int] = [:]
+            for (i, c) in out.enumerated() { if let pw = c.login?.password, groupStart[pw] == nil { groupStart[pw] = i } }
+            out.sort { a, b in
+                let ra = rank[a.id]!, rb = rank[b.id]!
+                if ra != rb { return ra < rb }
+                if ra == 1, let pa = a.login?.password, let pb = b.login?.password, pa != pb {
+                    return groupStart[pa, default: 0] < groupStart[pb, default: 0]
+                }
+                return pos[a.id]! < pos[b.id]!
+            }
         }
         return out
     }
@@ -645,6 +729,9 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
+
+
 
 
 

@@ -22,6 +22,12 @@ struct ItemListView: View {
             ForEach(items) { c in
                 ItemRow(cipher: c).tag(c.id)
             }
+            if model.sidebar == .security { SecurityFooter() }
+        }
+        .task(id: model.sidebar) {
+            if model.sidebar == .security, Prefs.d.bool(forKey: Prefs.detectCompromised), !model.health.exposedChecked {
+                await model.checkExposed()
+            }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if let c = model.cipher(ids.first) { ItemMenu(cipher: c) }
@@ -32,12 +38,15 @@ struct ItemListView: View {
         }
         .onChange(of: model.selectedId) { _, _ in model.draft = nil }
         .overlay {
-            if items.isEmpty {
+            if items.isEmpty && model.sidebar == .security && model.search.isEmpty {
+                ContentUnavailableView("No Security Recommendations", systemImage: "checkmark.shield", description: Text("None of your passwords are reused, easily guessed, or found in known data leaks."))
+            } else if items.isEmpty {
                 ContentUnavailableView(model.search.isEmpty ? "No Items" : "No Results", systemImage: model.search.isEmpty ? "tray" : "magnifyingglass")
             }
         }
         .navigationTitle(title)
-        .navigationSubtitle(model.sidebar == .codes ? "\(items.count) Verification Code\(items.count == 1 ? "" : "s")" : "\(items.count) Items")
+        .navigationSubtitle(model.sidebar == .codes ? "\(items.count) Verification Code\(items.count == 1 ? "" : "s")"
+                            : model.sidebar == .security ? "\(items.count) Recommendation\(items.count == 1 ? "" : "s")" : "\(items.count) Items")
         .toolbar {
             if model.sidebar == .codes {
                 if #available(macOS 26.0, *) {
@@ -98,32 +107,48 @@ extension AppModel {
 
 struct SecurityHeader: View {
     @Environment(AppModel.self) private var model
-    @State private var checking = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 14) {
-                stat("Weak", model.health.weak.count, .orange)
-                stat("Reused", model.health.reused.count, .yellow)
-                stat("Exposed", model.health.exposed.count, .red)
-                stat("HTTP", model.health.unsecured.count, .purple)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Swiftwarden privately and securely monitors your passwords to alert you if any are easily guessed, reused, or appear in data leaks from websites.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if model.checkingExposed {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Checking for data leaks…")
+                }
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else if !model.health.exposedChecked {
+                Button("Check for Data Leaks") { Task { await model.checkExposed() } }
+                    .controlSize(.small)
             }
-            Button {
-                checking = true
-                Task { await model.checkExposed(); checking = false }
-            } label: {
-                if checking { ProgressView().controlSize(.small) } else { Text(model.health.exposedChecked ? "Re-check Data Breaches" : "Check Data Breaches") }
-            }
-            .controlSize(.small)
-            .help("Uses Have I Been Pwned k-anonymity; your passwords never leave the device.")
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.card))
+        .padding(.bottom, 10)
+        .listRowSeparator(.hidden)
         .selectionDisabled()
     }
+}
 
-    func stat(_ l: String, _ n: Int, _ c: Color) -> some View {
-        VStack(alignment: .leading) {
-            Text("\(n)").font(.title3.bold()).foregroundStyle(c)
-            Text(l).font(.caption).foregroundStyle(.secondary)
+struct SecurityFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let hidden = model.hiddenFlaggedCount
+        if hidden > 0 {
+            Button(model.showHiddenWarnings ? "Don’t Show Hidden Warnings" : "Show Hidden Warnings (\(hidden))") {
+                model.showHiddenWarnings.toggle()
+            }
+            .buttonStyle(.link)
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+            .selectionDisabled()
         }
     }
 }
@@ -189,6 +214,7 @@ struct CountdownRing: View {
 
 struct ItemRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.backgroundProminence) private var prominence
     let cipher: Cipher
 
     var body: some View {
@@ -196,11 +222,19 @@ struct ItemRow: View {
             ItemIcon(cipher: cipher, size: 32)
             VStack(alignment: .leading, spacing: 1) {
                 Text(cipher.displayName).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(cipher.subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                if model.sidebar == .security, let issue = model.issues(cipher).min(by: { $0.rank < $1.rank }) {
+                    Text(issue.label + (model.isHidden(cipher.id) ? " · Hidden" : ""))
+                        .font(.system(size: 11)).lineLimit(1)
+                        .foregroundStyle(issue.isSevere && prominence != .increased && model.selectedId != cipher.id ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                } else {
+                    Text(cipher.subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if model.sidebar == .codes, let t = cipher.login?.totp {
                 CodeCell(secret: t)
+            } else if model.sidebar == .security {
+                EmptyView()
             } else if model.health.exposed[cipher.id] != nil {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.white, .red).font(.system(size: 17))
             } else if model.health.flagged(cipher.id) {
@@ -278,6 +312,7 @@ struct PendingReprompt: Identifiable {
     let id: String
     let action: () -> Void
 }
+
 
 
 

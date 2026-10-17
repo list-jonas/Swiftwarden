@@ -26,13 +26,14 @@ enum Prefs {
     static let appearance = "appearance"
     static let lastServer = "lastServer"
     static let lastEmail = "lastEmail"
+    static let detectCompromised = "detectCompromised"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
             timeoutMinutes: 15, timeoutAction: "lock", lockOnSleep: true, lockOnScreenLock: true, biometricUnlock: false,
             clearClipboard: 30, showIcons: true, autofillEnabled: true, autofillSuggestions: true, fillMethod: "type",
             autoSubmit: false, copyTotpAfterFill: true, hotkey: "cmdShiftL", menuBarIcon: true, pinRequireMasterOnRestart: false,
-            defaultUriMatch: 0, generatorType: "password", usernameType: "word", appearance: "system",
+            defaultUriMatch: 0, detectCompromised: true, generatorType: "password", usernameType: "word", appearance: "system",
         ])
     }
 
@@ -46,3 +47,4 @@ enum Prefs {
         d.set(try? JSONEncoder().encode(v), forKey: key)
     }
 }
+

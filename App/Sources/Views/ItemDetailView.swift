@@ -43,15 +43,23 @@ struct ItemDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                GroupCard {
-                    VStack(spacing: 10) {
-                        ItemIcon(cipher: cipher, size: 64)
-                        Text(cipher.displayName).font(.system(size: 22, weight: .bold)).multilineTextAlignment(.center).textSelection(.enabled)
+                let securityIssues = model.sidebar == .security ? model.issues(cipher) : []
+                if !securityIssues.isEmpty {
+                    SecurityHero(cipher: cipher, issues: securityIssues)
+                    GroupCard {
+                        VStack(spacing: 0) { rows }.padding(.top, -1).clipped().padding(.horizontal, 6).padding(.vertical, 6)
                     }
-                    .padding(.top, 20).padding(.bottom, 14).frame(maxWidth: .infinity)
-                    VStack(spacing: 0) { rows }.padding(.horizontal, 6).padding(.bottom, 6)
+                } else {
+                    GroupCard {
+                        VStack(spacing: 10) {
+                            ItemIcon(cipher: cipher, size: 64)
+                            Text(cipher.displayName).font(.system(size: 22, weight: .bold)).multilineTextAlignment(.center).textSelection(.enabled)
+                        }
+                        .padding(.top, 20).padding(.bottom, 14).frame(maxWidth: .infinity)
+                        VStack(spacing: 0) { rows }.padding(.horizontal, 6).padding(.bottom, 6)
+                    }
+                    IssueCards(cipher: cipher)
                 }
-                IssueCards(cipher: cipher)
                 if !(cipher.attachments ?? []).isEmpty { attachmentsCard }
             }
             .padding(16)
@@ -302,6 +310,79 @@ struct PasswordHistoryList: View {
     }
 }
 
+struct SecurityHero: View {
+    @Environment(AppModel.self) private var model
+    let cipher: Cipher
+    let issues: [SecurityIssue]
+
+    var website: URL? {
+        guard let u = cipher.login?.uris?.first(where: { URLMatcher.host(of: $0.uri ?? "") != nil })?.uri else { return nil }
+        return URL(string: u.contains("://") ? u : "https://" + u)
+    }
+
+    var title: String {
+        if issues.contains(where: { if case .exposed = $0 { true } else { false } }) { return "This password appeared in a data leak." }
+        if issues.allSatisfy({ $0 == .unsecured }) { return "This website isn’t secure." }
+        return "This password should be changed."
+    }
+
+    var message: String {
+        var parts: [String] = []
+        for issue in issues.sorted(by: { $0.rank < $1.rank }) {
+            switch issue {
+            case let .exposed(n):
+                parts.append("It was found \(n.formatted()) time\(n == 1 ? "" : "s") in known data leaks, which puts this account at high risk.")
+            case .reused:
+                let others = model.reusedWith(cipher).map(\.displayName)
+                let shown = others.prefix(2).map { "“\($0)”" }
+                var list = shown.joined(separator: " and ")
+                if others.count > 2 { list = shown.joined(separator: ", ") + " and \(others.count - 2) other\(others.count - 2 == 1 ? "" : "s")" }
+                parts.append(others.isEmpty ? "You’re using this password for more than one account." : "You’re already using the password for “\(cipher.displayName)” with \(list).")
+            case .weak:
+                parts.append("This password is easy to guess.")
+            case .unsecured:
+                parts.append("A website for this item uses an unencrypted http:// address.")
+            }
+        }
+        if issues.contains(where: { $0 != .unsecured }) {
+            parts.append("Change it on the website, then save a new, generated password here to help keep your account safe.")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    @ViewBuilder func actions(fill: Bool) -> some View {
+        let hidden = model.isHidden(cipher.id)
+        if let website {
+            Button { NSWorkspace.shared.open(website) } label: { Text("Change Password on Website…").fixedSize().frame(maxWidth: .infinity) }
+        }
+        Button { model.setHidden(cipher.id, !hidden) } label: { Text(hidden ? "Unhide" : "Hide").fixedSize().frame(maxWidth: .infinity) }
+    }
+
+    var body: some View {
+        GroupCard {
+            VStack(spacing: 12) {
+                ItemIcon(cipher: cipher, size: 64)
+                Text(title).font(.system(size: 20, weight: .bold)).multilineTextAlignment(.center)
+                Text(message)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 480)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { actions(fill: true) }
+                    VStack(spacing: 8) { actions(fill: true) }
+                }
+                .controlSize(.large)
+                .frame(maxWidth: 480)
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 24).padding(.vertical, 22)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
 struct IssueCards: View {
     @Environment(AppModel.self) private var model
     let cipher: Cipher
@@ -406,6 +487,8 @@ struct MoveToOrgSheet: View {
         .onAppear { org = model.organizations.first?.id ?? "" }
     }
 }
+
+
 
 
 
