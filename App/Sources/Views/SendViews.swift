@@ -38,7 +38,7 @@ struct SendListView: View {
             Menu {
                 Button { model.selectedSendId = "new-0" } label: { Label("Text", systemImage: "text.alignleft") }
                 Button { model.selectedSendId = "new-1" } label: { Label("File", systemImage: "doc") }
-            } label: { Image(systemName: "plus") }
+            } label: { Image(systemName: "plus").reportsToolbarEdge() }
         }
     }
 
@@ -190,3 +190,4 @@ struct SendEditView: View {
         }
     }
 }
+

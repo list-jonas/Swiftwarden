@@ -39,10 +39,16 @@ struct ItemListView: View {
         .navigationTitle(title)
         .navigationSubtitle(model.sidebar == .codes ? "\(items.count) Verification Code\(items.count == 1 ? "" : "s")" : "\(items.count) Items")
         .toolbar {
-            ToolbarItemGroup {
-                if model.sidebar == .codes {
-                    CountdownRing().help("Codes refresh every 30 seconds")
+            if model.sidebar == .codes {
+                if #available(macOS 26.0, *) {
+                    ToolbarItem { CountdownRing().help("Codes refresh every 30 seconds") }
+                        .sharedBackgroundVisibility(.hidden)
                 } else {
+                    ToolbarItem { CountdownRing().help("Codes refresh every 30 seconds") }
+                }
+            }
+            ToolbarItemGroup {
+                if model.sidebar != .codes {
                 Menu {
                     Picker("Sort By", selection: $model.sort) {
                         ForEach(SortOrder.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -52,7 +58,7 @@ struct ItemListView: View {
                     .help("Sort")
                 }
                 if model.sidebar == .trash {
-                    Button { model.emptyTrash() } label: { Image(systemName: "trash.slash") }.help("Empty Trash").disabled(items.isEmpty)
+                    Button { model.emptyTrash() } label: { Image(systemName: "trash.slash").reportsToolbarEdge() }.help("Empty Trash").disabled(items.isEmpty)
                 } else {
                     NewItemMenu()
                 }
@@ -68,7 +74,7 @@ struct NewItemMenu: View {
             ForEach(CipherType.allCases, id: \.self) { t in
                 Button { model.newItem(t) } label: { Label(t.label, systemImage: t.symbol) }
             }
-        } label: { Image(systemName: "plus") }
+        } label: { Image(systemName: "plus").reportsToolbarEdge() }
             .help("New Item")
     }
 }
@@ -122,6 +128,48 @@ struct SecurityHeader: View {
     }
 }
 
+extension View {
+    func reportsToolbarEdge() -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: { AppModel.shared.reportLastToolbarItemEdge($0) }
+    }
+}
+
+struct CodeCell: View {
+    @Environment(AppModel.self) private var model
+    let secret: String
+    @State private var copied = false
+    @State private var reset: Task<Void, Never>?
+
+    var body: some View {
+        Button(action: copyCode) {
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                Text(TOTP(secret).map { TOTPView.format($0.code(at: ctx.date)) } ?? "—")
+                    .font(.system(size: 15, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .opacity(copied ? 0 : 1)
+                    .overlay(alignment: .trailing) {
+                        if copied { CopiedPill().fixedSize().transition(.scale(scale: 0.8, anchor: .trailing).combined(with: .opacity)) }
+                    }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Click to copy")
+    }
+
+    func copyCode() {
+        model.copy(TOTP(secret)?.code(), "code", toast: false)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { copied = true }
+        reset?.cancel()
+        reset = Task {
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.3)) { copied = false }
+        }
+    }
+}
+
 struct CountdownRing: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
@@ -152,12 +200,7 @@ struct ItemRow: View {
             }
             Spacer(minLength: 4)
             if model.sidebar == .codes, let t = cipher.login?.totp {
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    Text(TOTP(t).map { TOTPView.format($0.code(at: ctx.date)) } ?? "—")
-                        .font(.system(size: 15, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
+                CodeCell(secret: t)
             } else if model.health.exposed[cipher.id] != nil {
                 Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.white, .red).font(.system(size: 17))
             } else if model.health.flagged(cipher.id) {
@@ -235,6 +278,15 @@ struct PendingReprompt: Identifiable {
     let id: String
     let action: () -> Void
 }
+
+
+
+
+
+
+
+
+
 
 
 

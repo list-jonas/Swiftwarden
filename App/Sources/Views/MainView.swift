@@ -8,7 +8,7 @@ struct MainView: View {
         @Bindable var model = model
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 236, max: 320)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 320)
         } content: {
             Group {
                 switch model.sidebar {
@@ -18,6 +18,7 @@ struct MainView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 440)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: { model.reportContentEdge($0) }
         } detail: {
             Group {
                 switch model.sidebar {
@@ -26,12 +27,14 @@ struct MainView: View {
                 default: ItemDetailContainer()
                 }
             }
-            .navigationSplitViewColumnWidth(min: 360, ideal: 560)
+            .toolbar {
+                if #available(macOS 26.0, *) {
+                    ToolbarItem { Color.clear.frame(width: model.toolbarShim, height: 1) }
+                        .sharedBackgroundVisibility(.hidden)
+                }
+            }
         }
         .searchable(text: $model.search, placement: .toolbar, prompt: Text(model.sidebar == .codes ? "Search Codes" : "Search"))
     }
 }
-
-
-
 

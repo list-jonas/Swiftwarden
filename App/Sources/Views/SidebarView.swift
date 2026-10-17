@@ -19,7 +19,8 @@ struct SidebarView: View {
                 Tile(item: .trash, symbol: "trash.fill", color: Palette.orange)
             }
             .padding(.vertical, 4)
-            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+            .padding(.horizontal, -7)
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             .selectionDisabled()
 
             if !model.organizations.isEmpty {
@@ -62,7 +63,9 @@ struct SidebarView: View {
                 HStack {
                     Text("Folders")
                     Spacer()
-                    Button { folderName = ""; newFolder = true } label: { Image(systemName: "plus") }.buttonStyle(.borderless).help("New Folder")
+                    Button { folderName = ""; newFolder = true } label: { Image(systemName: "plus").font(.system(size: 11, weight: .semibold)) }
+                        .buttonStyle(.borderless).help("New Folder")
+                        .padding(.trailing, 9)
                 }
             }
 
@@ -151,5 +154,8 @@ struct SyncFooter: View {
         .onTapGesture { Task { await model.sync() } }
     }
 }
+
+
+
 
 

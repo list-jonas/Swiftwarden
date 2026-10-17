@@ -91,6 +91,9 @@ final class AppModel {
         didSet { UserDefaults.standard.set(sort.rawValue, forKey: "sortOrder") }
     }
     var repromptPassed: Set<String> = []
+    var toolbarShim: CGFloat = 0
+    @ObservationIgnored private var contentEdge: CGFloat = 0
+    @ObservationIgnored private var lastItemEdge: CGFloat = 0
     var pendingReprompt: PendingReprompt?
     var generatorHistory: [PasswordHistory] = []
 
@@ -465,6 +468,17 @@ final class AppModel {
 
     func count(_ s: SidebarItem) -> Int { counts[s] ?? 0 }
 
+    func reportContentEdge(_ x: CGFloat) { contentEdge = x; alignToolbar() }
+    func reportLastToolbarItemEdge(_ x: CGFloat) { lastItemEdge = x; alignToolbar() }
+
+    private func alignToolbar() {
+        guard contentEdge > 0, lastItemEdge > 0 else { return }
+        let delta = lastItemEdge - (contentEdge - 30)
+        guard abs(delta) > 0.5 else { return }
+        let next = max(0, toolbarShim + delta)
+        if abs(next - toolbarShim) > 0.5 { toolbarShim = next }
+    }
+
     func cipher(_ id: String?) -> Cipher? { id.flatMap { i in ciphers.first { $0.id == i } } }
     func folderName(_ id: String?) -> String? { id.flatMap { i in folders.first { $0.id == i }?.name } }
     func orgName(_ id: String?) -> String? { id.flatMap { i in organizations.first { $0.id == i }?.name } }
@@ -631,6 +645,8 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
+
 
 
 
