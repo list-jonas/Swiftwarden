@@ -49,6 +49,7 @@ struct GeneratorOptions: View {
             if allowUsername { Text("Username").tag("username") }
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
         switch g.type {
         case "passphrase":
             Stepper("Words: \(g.pp.words)", value: $g.pp.words, in: 3 ... 20)
@@ -77,6 +78,7 @@ struct GeneratorOptions: View {
             HStack {
                 Text("Length")
                 Slider(value: Binding(get: { Double(g.pw.length) }, set: { g.pw.length = Int($0) }), in: 5 ... 128, step: 1)
+                    .frame(minWidth: 140)
                 Text("\(g.pw.length)").monospacedDigit().frame(width: 32)
             }
             Toggle("A-Z", isOn: $g.pw.uppercase)
@@ -184,3 +186,4 @@ struct GeneratorHistoryView: View {
         .toolbar { Button("Clear") { model.clearGeneratorHistory() }.disabled(model.generatorHistory.isEmpty) }
     }
 }
+

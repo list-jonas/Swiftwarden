@@ -17,7 +17,7 @@ struct MainView: View {
                 default: ItemListView()
                 }
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 420)
+            .navigationSplitViewColumnWidth(min: 250, ideal: 300, max: 440)
         } detail: {
             switch model.sidebar {
             case .sends: SendDetailContainer()
@@ -28,3 +28,4 @@ struct MainView: View {
         .searchable(text: $model.search, placement: .toolbar, prompt: "Search")
     }
 }
+

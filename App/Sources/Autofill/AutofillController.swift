@@ -174,9 +174,25 @@ final class AutofillController {
     func fill(_ c: Cipher, into t: FillTarget) {
         suggestions.hide()
         let m = AppModel.shared
-        m.withReprompt(c) { [self] in
-            if c.needsReprompt { NSApp.hide(nil) }
-            performFill(c, t)
+        guard c.needsReprompt && !m.repromptPassed.contains(c.id) else { performFill(c, t); return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Confirm master password"
+        alert.informativeText = "\(c.displayName) is protected by master password re-prompt."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Fill")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let pw = field.stringValue
+        Task {
+            if await m.verifyMasterPassword(pw) {
+                m.repromptPassed.insert(c.id)
+                performFill(c, t)
+            } else {
+                m.showToast("Invalid master password")
+            }
         }
     }
 
@@ -325,3 +341,4 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+

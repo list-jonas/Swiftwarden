@@ -144,7 +144,8 @@ struct ItemEditView: View {
         Section("Websites") {
             ForEach(Array((c.login?.uris ?? []).indices), id: \.self) { i in
                 HStack {
-                    TextField("https://", text: Binding(get: { c.login?.uris?[i].uri ?? "" }, set: { c.login?.uris?[i].uri = $0 }))
+                    TextField("Website", text: Binding(get: { c.login?.uris?[i].uri ?? "" }, set: { c.login?.uris?[i].uri = $0 }), prompt: Text("https://"))
+                        .labelsHidden()
                     Picker("", selection: Binding(get: { c.login?.uris?[i].match }, set: { c.login?.uris?[i].match = $0 })) {
                         Text("Default").tag(UriMatch?.none)
                         ForEach(UriMatch.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
@@ -248,3 +249,4 @@ extension Binding where Value == [Field]? {
         Binding<[Field]>(get: { wrappedValue ?? [] }, set: { wrappedValue = $0 })
     }
 }
+
