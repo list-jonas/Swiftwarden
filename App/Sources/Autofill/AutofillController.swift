@@ -26,6 +26,7 @@ final class AutofillController {
     private var observedPid: pid_t = 0
     private(set) var target: FillTarget?
     private var dismissed: AXUIElement?
+    private var filling = false
     private let suggestions = FloatingPanel(canKey: false)
     private let palette = FloatingPanel(canKey: true)
     private var hotKey: HotKey?
@@ -175,6 +176,7 @@ final class AutofillController {
     }
 
     func focusChanged() {
+        guard !filling else { return }
         guard enabled, Prefs.d.bool(forKey: Prefs.autofillSuggestions), let t = currentTarget() else {
             suggestions.hide(); target = nil; return
         }
@@ -256,14 +258,33 @@ final class AutofillController {
         let submit = Prefs.d.bool(forKey: Prefs.autoSubmit) && c.type == .login && t.kind.isLogin
         let app = t.app
         let totpSecret = c.type == .login && Prefs.d.bool(forKey: Prefs.copyTotpAfterFill) ? c.login?.totp.flatMap { $0.isEmpty ? nil : $0 } : nil
+        let origin = t.element
+        let others = plan.filter { !CFEqual($0.0, origin) }
+        let own = plan.filter { CFEqual($0.0, origin) }
+        filling = true
+        suggestions.hide()
         DispatchQueue.global(qos: .userInitiated).async {
+            defer {
+                usleep(250_000)
+                DispatchQueue.main.async {
+                    let s = AutofillController.shared
+                    s.dismissed = origin
+                    s.filling = false
+                }
+            }
             Filler.waitForModifiersReleased()
             app.activate()
             usleep(120_000)
-            for (el, text) in plan {
+            var moved = false
+            for (el, text) in others where !Filler.setQuietly(text, on: el) {
                 Filler.set(text, on: el, method: method)
+                moved = true
                 usleep(80_000)
             }
+            if own.isEmpty, moved {
+                AXUIElementSetAttributeValue(origin, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            }
+            for (el, text) in own { Filler.set(text, on: el, method: method) }
             if submit { Filler.key(UInt16(kVK_Return)) }
             guard let totpSecret else { return }
             if method == "paste" { usleep(700_000) }
@@ -423,6 +444,13 @@ enum Filler {
         return AX.isSecure(el) ? v.count == text.count : v == text
     }
 
+    static func setQuietly(_ text: String, on el: AXUIElement) -> Bool {
+        guard !AX.isSecure(el) else { return false }
+        guard AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString) == .success else { return false }
+        usleep(40000)
+        return AX.string(el, kAXValueAttribute) == text
+    }
+
     static func set(_ text: String, on el: AXUIElement, method: String) {
         AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         usleep(60000)
@@ -491,6 +519,7 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
 
 
 
