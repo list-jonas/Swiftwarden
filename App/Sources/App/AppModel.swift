@@ -299,8 +299,11 @@ final class AppModel {
         defer { syncing = false }
         do {
             let data = try await svc.fetchSync()
-            try? data.write(to: Paths.syncCache, options: .atomic)
-            await apply(data)
+            let cached = try? Data(contentsOf: Paths.syncCache)
+            if cached != data || ciphers.isEmpty {
+                try? data.write(to: Paths.syncCache, options: .atomic)
+                await apply(data)
+            }
             account?.lastSync = Date()
             lastRevision = try? await svc.revisionDate()
             if let p = profile, let k = p.key, account?.protectedUserKey != k { account?.protectedUserKey = k }
@@ -332,6 +335,10 @@ final class AppModel {
         policies = v.policies
         rebuildIndex()
         computeHealth()
+        Task.detached(priority: .background) {
+            try? await Task.sleep(for: .seconds(2))
+            malloc_zone_pressure_relief(nil, 0)
+        }
     }
 
     private func rebuildIndex() {
@@ -412,7 +419,7 @@ final class AppModel {
         let q = (query ?? search).trimmingCharacters(in: .whitespaces).lowercased()
         _ = ciphers.count
         _ = health.exposedChecked
-        let key = "(String(describing: s))|(sort.rawValue)|(dataVersion)"
+        let key = "\(String(describing: s))|\(sort.rawValue)|\(dataVersion)"
         var out: [Cipher]
         if let c = baseCache, c.key == key {
             out = c.items
@@ -498,6 +505,10 @@ final class AppModel {
         if let i = ciphers.firstIndex(where: { $0.id == c.id }) { ciphers[i] = c } else { ciphers.append(c) }
         rebuildIndex()
         computeHealth()
+        Task.detached(priority: .background) {
+            try? await Task.sleep(for: .seconds(2))
+            malloc_zone_pressure_relief(nil, 0)
+        }
     }
 
     func toggleFavorite(_ c: Cipher) {
@@ -620,6 +631,9 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
+
+
 
 
 
