@@ -255,6 +255,7 @@ final class AutofillController {
         let method = Prefs.d.string(forKey: Prefs.fillMethod) ?? "type"
         let submit = Prefs.d.bool(forKey: Prefs.autoSubmit) && c.type == .login && t.kind.isLogin
         let app = t.app
+        let totpSecret = c.type == .login && Prefs.d.bool(forKey: Prefs.copyTotpAfterFill) ? c.login?.totp.flatMap { $0.isEmpty ? nil : $0 } : nil
         DispatchQueue.global(qos: .userInitiated).async {
             Filler.waitForModifiersReleased()
             app.activate()
@@ -264,10 +265,11 @@ final class AutofillController {
                 usleep(80_000)
             }
             if submit { Filler.key(UInt16(kVK_Return)) }
-        }
-        let filledCode = c.login?.totp.flatMap { TOTP($0)?.code() }.map { code in plan.contains { $0.1 == code } } ?? false
-        if c.type == .login, !filledCode, Prefs.d.bool(forKey: Prefs.copyTotpAfterFill), let s = c.login?.totp, let code = TOTP(s)?.code() {
-            AppModel.shared.copy(code, "verification code")
+            guard let totpSecret else { return }
+            if method == "paste" { usleep(700_000) }
+            DispatchQueue.main.async {
+                if let code = TOTP(totpSecret)?.code() { AppModel.shared.copy(code, "verification code") }
+            }
         }
     }
 
@@ -489,6 +491,7 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
 
 
 
