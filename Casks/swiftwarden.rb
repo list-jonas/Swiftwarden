@@ -12,22 +12,23 @@ cask "swiftwarden" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "Swiftwarden.app"
 
-  postflight do
-    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{appdir}/Swiftwarden.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args:           ["-dr", "com.apple.quarantine", "{{appdir}}/Swiftwarden.app"],
+                          writable_paths: ["{{appdir}}/Swiftwarden.app"]
   end
 
-  uninstall quit:       "com.listjonas.swiftwarden",
-            login_item: "Swiftwarden"
+  uninstall quit: "com.listjonas.swiftwarden"
 
-  zap trash: [
-    "~/Library/Application Support/Swiftwarden",
-    "~/Library/Caches/Swiftwarden",
-    "~/Library/Preferences/com.listjonas.swiftwarden.plist",
-  ]
+  zap login_item: "Swiftwarden",
+      trash:      [
+        "~/Library/Application Support/Swiftwarden",
+        "~/Library/Caches/Swiftwarden",
+        "~/Library/Preferences/com.listjonas.swiftwarden.plist",
+      ]
 
   caveats <<~EOS
     Swiftwarden is not signed with an Apple Developer ID. The cask removes the
