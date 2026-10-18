@@ -27,6 +27,7 @@ enum Prefs {
     static let lastServer = "lastServer"
     static let lastEmail = "lastEmail"
     static let detectCompromised = "detectCompromised"
+    static let settingsTab = "settingsTab"
 
     static func register() {
         UserDefaults.standard.register(defaults: [

@@ -4,12 +4,15 @@ import SwiftwardenCore
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
+    @AppStorage(Prefs.settingsTab) private var tab = "general"
+
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            SecuritySettings().tabItem { Label("Security", systemImage: "lock") }
-            AutofillSettings().tabItem { Label("Autofill", systemImage: "rectangle.and.pencil.and.ellipsis") }
-            AccountSettings().tabItem { Label("Account", systemImage: "person.crop.circle") }
+        TabView(selection: $tab) {
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            SidebarSettings().tabItem { Label("Sidebar", systemImage: "sidebar.left") }.tag("sidebar")
+            SecuritySettings().tabItem { Label("Security", systemImage: "lock") }.tag("security")
+            AutofillSettings().tabItem { Label("Autofill", systemImage: "rectangle.and.pencil.and.ellipsis") }.tag("autofill")
+            AccountSettings().tabItem { Label("Account", systemImage: "person.crop.circle") }.tag("account")
         }
         .frame(width: 520)
         .frame(minHeight: 420)
