@@ -58,6 +58,9 @@ final class BackgroundMode {
         let key = "loginItemConfigured"
         guard !Flavor.isDev, !Prefs.d.bool(forKey: key), Bundle.main.bundlePath.hasPrefix("/Applications/") else { return }
         Prefs.d.set(true, forKey: key)
-        if SMAppService.mainApp.status != .enabled { try? SMAppService.mainApp.register() }
+        Task {
+            try? await SMAppService.mainApp.unregister()
+            try? SMAppService.mainApp.register()
+        }
     }
 }

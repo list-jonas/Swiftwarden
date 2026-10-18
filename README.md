@@ -31,11 +31,7 @@ Requirements: Xcode 26 or later (Liquid Glass `.icon` app icon) and [XcodeGen](h
 
 The Debug configuration is a separate app: bundle id `com.listjonas.swiftwarden.dev`, its own settings, keychain items, data folder, orange icon, hammer menu bar icon and ⌥⌘L as quick-fill shortcut. Running from Xcode builds it too, so the installed app stays untouched while you work. The icons live in `App/Resources/AppIcon.icon` and `AppIconDev.icon` (open them in Icon Composer).
 
-Without `SIGN_IDENTITY` the app is ad-hoc signed and macOS asks for Accessibility access again after every build. Sign with a stable identity to keep it (`install.sh` picks your first Developer ID identity automatically):
-
-    SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" scripts/build.sh
-
-macOS can still drop the grant after re-signing; toggle Swiftwarden off and on in System Settings → Privacy & Security → Accessibility if autofill stops reacting.
+Builds are ad-hoc signed only, so macOS asks for Accessibility access (and Keychain access) again after each reinstall. If autofill stops reacting, toggle Swiftwarden off and on in System Settings → Privacy & Security → Accessibility.
 
 To work in Xcode, run `xcodegen generate` and open `Swiftwarden.xcodeproj`.
 
