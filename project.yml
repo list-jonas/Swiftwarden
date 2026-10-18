@@ -31,6 +31,8 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: Swiftwarden is an unofficial Bitwarden client.
+        LSEnvironment:
+          MallocSpaceEfficient: "1"
     entitlements:
       path: App/Swiftwarden.entitlements
       properties:

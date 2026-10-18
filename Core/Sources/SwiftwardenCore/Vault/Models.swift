@@ -156,28 +156,28 @@ public struct Attachment: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-public struct Cipher: Codable, Hashable, Sendable, Identifiable {
-    public var id: String = ""
-    public var organizationId, folderId: String?
-    public var type: CipherType = .login
-    public var name, notes: String?
-    public var favorite: Bool?
-    public var reprompt: Int?
-    public var key: String?
-    public var login: Login?
-    public var card: Card?
-    public var identity: Identity?
-    public var secureNote: SecureNote?
-    public var sshKey: SSHKeyData?
-    public var fields: [Field]?
-    public var passwordHistory: [PasswordHistory]?
-    public var attachments: [Attachment]?
-    public var collectionIds: [String]?
-    public var revisionDate, creationDate, deletedDate, archivedDate: String?
-    public var edit, viewPassword, organizationUseTotp: Bool?
-    public var lastKnownRevisionDate: String?
+struct CipherData: Codable, Hashable, Sendable {
+    var id: String = ""
+    var organizationId, folderId: String?
+    var type: CipherType = .login
+    var name, notes: String?
+    var favorite: Bool?
+    var reprompt: Int?
+    var key: String?
+    var login: Login?
+    var card: Card?
+    var identity: Identity?
+    var secureNote: SecureNote?
+    var sshKey: SSHKeyData?
+    var fields: [Field]?
+    var passwordHistory: [PasswordHistory]?
+    var attachments: [Attachment]?
+    var collectionIds: [String]?
+    var revisionDate, creationDate, deletedDate, archivedDate: String?
+    var edit, viewPassword, organizationUseTotp: Bool?
+    var lastKnownRevisionDate: String?
 
-    public init(type: CipherType = .login) {
+    init(type: CipherType = .login) {
         self.type = type
         switch type {
         case .login: login = Login()
@@ -188,7 +188,7 @@ public struct Cipher: Codable, Hashable, Sendable, Identifiable {
         }
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
         organizationId = try c.decodeIfPresent(String.self, forKey: .organizationId)
@@ -216,6 +216,55 @@ public struct Cipher: Codable, Hashable, Sendable, Identifiable {
         viewPassword = try c.decodeIfPresent(Bool.self, forKey: .viewPassword)
         organizationUseTotp = try c.decodeIfPresent(Bool.self, forKey: .organizationUseTotp)
     }
+}
+
+public struct Cipher: Codable, Hashable, Sendable, Identifiable {
+    private final class Box: @unchecked Sendable {
+        var v: CipherData
+        init(_ v: CipherData) { self.v = v }
+    }
+
+    private var box: Box
+    private var v: CipherData {
+        get { box.v }
+        _modify {
+            if !isKnownUniquelyReferenced(&box) { box = Box(box.v) }
+            yield &box.v
+        }
+    }
+
+    public init(type: CipherType = .login) { box = Box(CipherData(type: type)) }
+    public init(from decoder: Decoder) throws { box = Box(try CipherData(from: decoder)) }
+    public func encode(to encoder: Encoder) throws { try box.v.encode(to: encoder) }
+    public static func == (a: Cipher, b: Cipher) -> Bool { a.box === b.box || a.box.v == b.box.v }
+    public func hash(into h: inout Hasher) { h.combine(box.v) }
+
+    public var id: String { get { box.v.id } _modify { yield &v.id } }
+    public var organizationId: String? { get { box.v.organizationId } _modify { yield &v.organizationId } }
+    public var folderId: String? { get { box.v.folderId } _modify { yield &v.folderId } }
+    public var type: CipherType { get { box.v.type } _modify { yield &v.type } }
+    public var name: String? { get { box.v.name } _modify { yield &v.name } }
+    public var notes: String? { get { box.v.notes } _modify { yield &v.notes } }
+    public var favorite: Bool? { get { box.v.favorite } _modify { yield &v.favorite } }
+    public var reprompt: Int? { get { box.v.reprompt } _modify { yield &v.reprompt } }
+    public var key: String? { get { box.v.key } _modify { yield &v.key } }
+    public var login: Login? { get { box.v.login } _modify { yield &v.login } }
+    public var card: Card? { get { box.v.card } _modify { yield &v.card } }
+    public var identity: Identity? { get { box.v.identity } _modify { yield &v.identity } }
+    public var secureNote: SecureNote? { get { box.v.secureNote } _modify { yield &v.secureNote } }
+    public var sshKey: SSHKeyData? { get { box.v.sshKey } _modify { yield &v.sshKey } }
+    public var fields: [Field]? { get { box.v.fields } _modify { yield &v.fields } }
+    public var passwordHistory: [PasswordHistory]? { get { box.v.passwordHistory } _modify { yield &v.passwordHistory } }
+    public var attachments: [Attachment]? { get { box.v.attachments } _modify { yield &v.attachments } }
+    public var collectionIds: [String]? { get { box.v.collectionIds } _modify { yield &v.collectionIds } }
+    public var revisionDate: String? { get { box.v.revisionDate } _modify { yield &v.revisionDate } }
+    public var creationDate: String? { get { box.v.creationDate } _modify { yield &v.creationDate } }
+    public var deletedDate: String? { get { box.v.deletedDate } _modify { yield &v.deletedDate } }
+    public var archivedDate: String? { get { box.v.archivedDate } _modify { yield &v.archivedDate } }
+    public var edit: Bool? { get { box.v.edit } _modify { yield &v.edit } }
+    public var viewPassword: Bool? { get { box.v.viewPassword } _modify { yield &v.viewPassword } }
+    public var organizationUseTotp: Bool? { get { box.v.organizationUseTotp } _modify { yield &v.organizationUseTotp } }
+    public var lastKnownRevisionDate: String? { get { box.v.lastKnownRevisionDate } _modify { yield &v.lastKnownRevisionDate } }
 
     public var isDeleted: Bool { deletedDate != nil }
     public var isFavorite: Bool { favorite ?? false }

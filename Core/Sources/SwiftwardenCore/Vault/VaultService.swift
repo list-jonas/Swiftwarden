@@ -241,7 +241,7 @@ public final class VaultService: @unchecked Sendable {
         guard list.count > 64 else { return list.map(decrypt) }
         let out = UnsafeMutableBufferPointer<Cipher?>.allocate(capacity: list.count)
         out.initialize(repeating: nil)
-        defer { out.deallocate() }
+        defer { out.deinitialize(); out.deallocate() }
         let chunks = min(ProcessInfo.processInfo.activeProcessorCount * 2, list.count)
         let size = (list.count + chunks - 1) / chunks
         let box = UncheckedBox(out)

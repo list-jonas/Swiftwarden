@@ -27,12 +27,13 @@ final class IconEntry: @unchecked Sendable {
     let image: NSImage
     let tint: NSColor
     init(image: NSImage, tint: NSColor) { self.image = image; self.tint = tint }
+    var cost: Int { Int(image.size.width * image.size.height) * 4 }
 }
 
 enum IconMemory {
     nonisolated(unsafe) static let cache: NSCache<NSString, IconEntry> = {
         let c = NSCache<NSString, IconEntry>()
-        c.countLimit = 2000
+        c.totalCostLimit = 16 << 20
         return c
     }()
 
@@ -47,6 +48,7 @@ actor IconStore {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
+        c.urlCache = nil
         c.httpMaximumConnectionsPerHost = 6
         c.timeoutIntervalForRequest = 15
         return URLSession(configuration: c)
@@ -90,7 +92,7 @@ actor IconStore {
         inflight[host] = t
         let i = await t.value
         inflight[host] = nil
-        if let i { IconMemory.cache.setObject(i, forKey: host as NSString) } else { missing.insert(host) }
+        if let i { IconMemory.cache.setObject(i, forKey: host as NSString, cost: i.cost) } else { missing.insert(host) }
         return i
     }
 

@@ -111,6 +111,19 @@ final class AppModel {
     }
     @ObservationIgnored var searchIndex: [String: String] = [:]
 
+    var windowVisible = true {
+        didSet {
+            guard windowVisible != oldValue else { return }
+            if windowVisible { uiAlive = true; return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+                guard !windowVisible else { return }
+                uiAlive = false
+                Self.relieveMalloc()
+            }
+        }
+    }
+    var uiAlive = true
+    @ObservationIgnored private var pressureSource: DispatchSourceMemoryPressure?
     var syncing = false
     var errorMessage: String?
     var unlockNotice: String?
@@ -314,6 +327,7 @@ final class AppModel {
 
     private func clearVault() {
         service = nil
+        trimMemory()
         ciphers = []; folders = []; collections = []; organizations = []; sends = []; profile = nil
         searchIndex = [:]; health = HealthReport(); lastRevision = nil; draft = nil; selectedId = nil; repromptPassed = []
         generatorHistory = []
@@ -413,10 +427,27 @@ final class AppModel {
         policies = v.policies
         rebuildIndex()
         computeHealth()
+        Self.relieveMalloc()
+    }
+
+    func trimMemory() {
+        sectionCache = [:]; sortedAll = []; sectionCacheVersion = ""
+        IconMemory.cache.removeAllObjects()
+        Self.relieveMalloc()
+    }
+
+    nonisolated static func relieveMalloc() {
         Task.detached(priority: .background) {
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(1))
             malloc_zone_pressure_relief(nil, 0)
         }
+    }
+
+    func watchMemoryPressure() {
+        let s = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        s.setEventHandler { MainActor.assumeIsolated { AppModel.shared.trimMemory() } }
+        s.resume()
+        pressureSource = s
     }
 
     private func rebuildIndex() {
@@ -458,11 +489,16 @@ final class AppModel {
         let items = ciphers.filter { !$0.isDeleted && $0.type == .login && !($0.login?.password ?? "").isEmpty }
         let passwords = Array(Set(items.compactMap { $0.login?.password }))
         var counts: [String: Int] = [:]
+        let cfg = Self.pwnedConfiguration()
+        cfg.urlCache = nil
+        cfg.httpMaximumConnectionsPerHost = 8
+        let session = URLSession(configuration: cfg)
+        defer { session.finishTasksAndInvalidate() }
         await withTaskGroup(of: (String, Int?).self) { group in
             var it = passwords.makeIterator()
             func next() -> Bool {
                 guard let pw = it.next() else { return false }
-                group.addTask { (pw, await Self.pwnedCount(pw)) }
+                group.addTask { (pw, await Self.pwnedCount(pw, session)) }
                 return true
             }
             for _ in 0 ..< 8 where next() {}
@@ -477,11 +513,13 @@ final class AppModel {
         health.exposedChecked = true
     }
 
-    nonisolated static func pwnedCount(_ pw: String) async -> Int? {
+    nonisolated(unsafe) static var pwnedConfiguration: () -> URLSessionConfiguration = { .ephemeral }
+
+    nonisolated static func pwnedCount(_ pw: String, _ session: URLSession = .shared) async -> Int? {
         let hash = Primitives.sha1(Data(pw.utf8)).hex.uppercased()
         let prefix = String(hash.prefix(5)), suffix = hash.dropFirst(5)
         guard let url = URL(string: "https://api.pwnedpasswords.com/range/\(prefix)"),
-              let (d, _) = try? await URLSession.shared.data(from: url), let body = String(data: d, encoding: .utf8) else { return nil }
+              let (d, _) = try? await session.data(from: url), let body = String(data: d, encoding: .utf8) else { return nil }
         for line in body.split(whereSeparator: \.isNewline) where line.hasPrefix(suffix) {
             return Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
         }
@@ -658,10 +696,7 @@ final class AppModel {
         if let i = ciphers.firstIndex(where: { $0.id == c.id }) { ciphers[i] = c } else { ciphers.append(c) }
         rebuildIndex()
         computeHealth()
-        Task.detached(priority: .background) {
-            try? await Task.sleep(for: .seconds(2))
-            malloc_zone_pressure_relief(nil, 0)
-        }
+        Self.relieveMalloc()
     }
 
     func toggleFavorite(_ c: Cipher) {

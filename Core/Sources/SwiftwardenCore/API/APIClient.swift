@@ -120,11 +120,14 @@ public final class APIClient: @unchecked Sendable {
         self.deviceId = deviceId
         self.tokens = tokens
         let cfg = URLSessionConfiguration.ephemeral
+        cfg.urlCache = nil
         cfg.timeoutIntervalForRequest = 30
         cfg.httpAdditionalHeaders = ["Bitwarden-Client-Name": Self.clientName, "Bitwarden-Client-Version": Self.clientVersion,
                                      "Device-Type": String(Self.deviceType)]
         session = URLSession(configuration: cfg)
     }
+
+    deinit { session.finishTasksAndInvalidate() }
 
     func check(_ data: Data, _ resp: URLResponse) throws {
         guard let http = resp as? HTTPURLResponse else { throw APIError.invalidResponse }

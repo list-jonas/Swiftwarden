@@ -10,7 +10,7 @@ struct RootView: View {
             switch model.phase {
             case .loggedOut: LoginView()
             case .locked: UnlockView()
-            case .unlocked: MainView()
+            case .unlocked: if model.uiAlive { MainView() } else { Color.clear }
             }
         }
         .overlay(alignment: .bottom) {
