@@ -144,7 +144,7 @@ git tag v0.2.0 && git push origin v0.2.0
 
 - Duo and FIDO2/WebAuthn two-step login (use authenticator, email or API key login)
 - SSO, trusted devices and Key Connector
-- Creating passkeys and the system AutoFill credential provider
+- System AutoFill (AutoFill & Passwords) and passkeys. They need Apple's AutoFill Credential Provider capability, which Apple only grants to paid Apple Developer Program teams: a free Personal Team is refused when Xcode requests the provisioning profile, and a build that claims the capability without a profile is killed at launch. Swiftwarden's own autofill uses the Accessibility API instead.
 - Several accounts at once
 - Bitwarden's SSH agent
 
