@@ -61,4 +61,24 @@ targets:
           COPY_PHASE_STRIP: YES
           SWIFT_COMPILATION_MODE: wholemodule
           DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+    scheme:
+      testTargets:
+        - SwiftwardenTests
+      gatherCoverageData: true
+  SwiftwardenTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: App/Sources
+        excludes:
+          - App/SwiftwardenApp.swift
+      - App/Tests
+    dependencies:
+      - package: SwiftwardenCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.listjonas.swiftwarden.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
 

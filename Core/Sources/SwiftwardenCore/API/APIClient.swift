@@ -115,11 +115,11 @@ public final class APIClient: @unchecked Sendable {
     public static let clientVersion = "2025.10.0"
     public static let deviceType = 7
 
-    public init(env: ServerEnvironment, deviceId: String, tokens: Tokens? = nil) {
+    public init(env: ServerEnvironment, deviceId: String, tokens: Tokens? = nil, configuration: URLSessionConfiguration = .ephemeral) {
         self.env = env
         self.deviceId = deviceId
         self.tokens = tokens
-        let cfg = URLSessionConfiguration.ephemeral
+        let cfg = configuration
         cfg.urlCache = nil
         cfg.timeoutIntervalForRequest = 30
         cfg.httpAdditionalHeaders = ["Bitwarden-Client-Name": Self.clientName, "Bitwarden-Client-Version": Self.clientVersion,
@@ -203,20 +203,25 @@ public final class APIClient: @unchecked Sendable {
     }
 
     public func refresh() async throws {
-        if let existing = lock.withLock({ refreshTask }) { return try await existing.value }
-        let task = Task {
-            guard let t = tokens else { throw APIError.unauthorized }
-            if let r = t.refresh {
-                _ = try await token(["grant_type": "refresh_token", "client_id": Self.clientName, "refresh_token": r])
-            } else if let id = t.clientId, let secret = t.clientSecret {
-                _ = try await token(["grant_type": "client_credentials", "client_id": id, "client_secret": secret, "scope": "api"])
-            } else {
-                throw APIError.unauthorized
-            }
+        let (task, owner) = lock.withLock { () -> (Task<Void, Error>, Bool) in
+            if let existing = refreshTask { return (existing, false) }
+            let t = Task { try await self.performRefresh() }
+            refreshTask = t
+            return (t, true)
         }
-        lock.withLock { refreshTask = task }
-        defer { lock.withLock { refreshTask = nil } }
+        defer { if owner { lock.withLock { refreshTask = nil } } }
         try await task.value
+    }
+
+    private func performRefresh() async throws {
+        guard let t = tokens else { throw APIError.unauthorized }
+        if let r = t.refresh {
+            _ = try await token(["grant_type": "refresh_token", "client_id": Self.clientName, "refresh_token": r])
+        } else if let id = t.clientId, let secret = t.clientSecret {
+            _ = try await token(["grant_type": "client_credentials", "client_id": id, "client_secret": secret, "scope": "api"])
+        } else {
+            throw APIError.unauthorized
+        }
     }
 
     public func raw(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json", auth: Bool = true) async throws -> Data {

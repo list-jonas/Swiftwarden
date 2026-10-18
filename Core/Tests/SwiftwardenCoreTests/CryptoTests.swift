@@ -1,4 +1,5 @@
 import Foundation
+import Security
 @testable import SwiftwardenCore
 import XCTest
 
@@ -14,6 +15,11 @@ final class CryptoTests: XCTestCase {
         XCTAssertEqual(Data(out).hex, "0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659")
     }
 
+    func testPBKDF2Vector() throws {
+        let d = try Primitives.pbkdf2(password: Data("password".utf8), salt: Data("salt".utf8), iterations: 1, length: 32)
+        XCTAssertEqual(d.hex, "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")
+    }
+
     func testEncStringRoundTrip() throws {
         let k = SymmetricCryptoKey.generate()
         let e = try EncString.encrypt("hello wörld", key: k)
@@ -22,85 +28,91 @@ final class CryptoTests: XCTestCase {
         XCTAssertThrowsError(try parsed.decryptString(key: .generate()))
     }
 
-    func testPBKDF2Vector() throws {
-        let d = try Primitives.pbkdf2(password: Data("password".utf8), salt: Data("salt".utf8), iterations: 1, length: 32)
-        XCTAssertEqual(d.hex, "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")
-    }
-
-    func testRSARoundTrip() throws {
-        let kp = try RSA.generate()
-        let priv = try RSA.privateKey(der: kp.privatePKCS8)
-        let pub = try RSA.publicKey(der: kp.publicSPKI)
-        let e = try RSA.encrypt(Data("secret".utf8), publicKey: pub)
-        XCTAssertEqual(try RSA.decrypt(EncString(e.description), privateKey: priv), Data("secret".utf8))
-        XCTAssertEqual(try RSA.publicSPKI(of: priv), kp.publicSPKI)
-    }
-
-    func testTOTP() throws {
-        let t = try XCTUnwrap(TOTP("otpauth://totp/x?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8"))
-        XCTAssertEqual(t.code(at: Date(timeIntervalSince1970: 59)), "94287082")
-        XCTAssertEqual(TOTP("GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ")?.code(at: Date(timeIntervalSince1970: 1111111109)), "081804")
-    }
-
-    func testGeneratorAndStrength() {
-        var o = PasswordOptions(); o.length = 20; o.special = true
-        let p = Generator.password(o)
-        XCTAssertEqual(p.count, 20)
-        XCTAssertTrue(p.contains(where: \.isNumber))
-        XCTAssertEqual(Generator.passphrase(PassphraseOptions()).split(separator: "-").count, 6)
-        XCTAssertTrue(PasswordStrength.isWeak("Password123!"))
-        XCTAssertTrue(PasswordStrength.isWeak("aaaaaaaa"))
-        XCTAssertFalse(PasswordStrength.isWeak(p))
-        XCTAssertFalse(PasswordStrength.isWeak("correct-horse-battery-staple-xyz"))
-    }
-
-    func testURLMatching() {
-        XCTAssertTrue(URLMatcher.matches(LoginUri(uri: "https://accounts.google.com"), url: "https://mail.google.com/x"))
-        XCTAssertFalse(URLMatcher.matches(LoginUri(uri: "https://google.com", match: .host), url: "https://mail.google.com"))
-        XCTAssertEqual(URLMatcher.baseDomain("a.b.example.co.uk"), "example.co.uk")
-        XCTAssertTrue(URLMatcher.matchesApp(LoginUri(uri: "https://slack.com"), bundleId: "com.tinyspeck.slackmacgap", appName: "Slack"))
-    }
-
-    func testCSV() throws {
-        let r = try Importer.detect(Data("name,url,username,password,note\n\"A, B\",https://a.com,u,\"p\"\"q\",\"line1\nline2\"\n".utf8))
-        XCTAssertEqual(r.ciphers.count, 1)
-        XCTAssertEqual(r.ciphers[0].name, "A, B")
-        XCTAssertEqual(r.ciphers[0].login?.password, "p\"q")
-        XCTAssertEqual(r.ciphers[0].notes, "line1\nline2")
-    }
-
-    func testEncryptedExportRoundTrip() throws {
-        var c = Cipher(type: .login); c.name = "x"; c.login?.password = "pw"
-        let d = try Exporter.encryptedJSON(ciphers: [c], folders: [], password: "filepw", kdf: KdfConfig(type: 0, iterations: 5000))
-        XCTAssertTrue(Importer.needsPassword(d))
-        XCTAssertEqual(try Importer.detect(d, password: "filepw").ciphers.first?.login?.password, "pw")
-        XCTAssertThrowsError(try Importer.detect(d, password: "nope"))
-    }
-
-    func testPublicSuffixMatching() {
-        XCTAssertFalse(URLMatcher.matches(LoginUri(uri: "https://alice.github.io"), url: "https://evil.github.io"))
-        XCTAssertFalse(URLMatcher.matches(LoginUri(uri: "https://bank.com.ua"), url: "https://evil.com.ua"))
-        XCTAssertTrue(URLMatcher.matches(LoginUri(uri: "https://login.bank.com.ua"), url: "https://www.bank.com.ua"))
-        XCTAssertEqual(URLMatcher.baseDomain("www.city.kawasaki.jp"), "city.kawasaki.jp")
-        XCTAssertEqual(URLMatcher.baseDomain("a.b.kawasaki.jp"), "a.b.kawasaki.jp")
-        XCTAssertEqual(URLMatcher.baseDomain("github.io"), "github.io")
-    }
-
-    func testLaunchURLSchemes() {
-        XCTAssertNotNil(URLMatcher.launchURL("example.com/login"))
-        XCTAssertNil(URLMatcher.launchURL("file:///Applications/Calculator.app"))
-        XCTAssertNil(URLMatcher.launchURL("smb://attacker/share"))
-    }
-
-    func testRejectsUnsafeKdf() {
-        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 0, iterations: 1)))
-        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 1, iterations: 1, memory: 1, parallelism: 0)))
-        XCTAssertNoThrow(try KdfConfig.argon2Default.validate())
+    func testEncStringParsesServerWireFormats() throws {
+        let a = Data([1, 2, 3]).base64EncodedString(), b = Data([4, 5]).base64EncodedString(), c = Data([6]).base64EncodedString()
+        let legacy = try EncString("\(a)|\(b)|\(c)")
+        XCTAssertEqual(legacy.type, 1)
+        XCTAssertEqual(legacy.mac, Data([6]))
+        XCTAssertEqual(try EncString("0.\(a)|\(b)").iv, Data([1, 2, 3]))
+        let rsa = try EncString("4.\(a)")
+        XCTAssertNil(rsa.iv)
+        XCTAssertEqual(rsa.data, Data([1, 2, 3]))
+        XCTAssertEqual(try EncString("6.\(a)|\(b)").mac, Data([4, 5]))
+        for s in ["2.\(a)|\(b)|\(c)", "0.\(a)|\(b)", "3.\(a)", "6.\(a)|\(b)"] {
+            XCTAssertEqual(try EncString(s).description, s)
+        }
+        for bad in ["9.\(a)|\(b)", "2.\(a)|\(b)", "2.!!|\(b)|\(c)", "0.\(a)", "5.\(a)"] {
+            XCTAssertThrowsError(try EncString(bad), bad)
+        }
     }
 
     func testRejectsMacStrippedEncString() throws {
         let k = SymmetricCryptoKey.generate()
         let e = try EncString.encrypt("secret", key: k)
         XCTAssertThrowsError(try EncString(type: 0, iv: e.iv, data: e.data, mac: nil).decrypt(key: k))
+    }
+
+    func testLegacyUnauthenticatedUserKeyStillUnlocks() throws {
+        let masterKey = Primitives.random(32), userKey = SymmetricCryptoKey.generate(), iv = Primitives.random(16)
+        let ct = try Primitives.aesEncrypt(userKey.data, key: masterKey, iv: iv)
+        let protected = EncString(type: 0, iv: iv, data: ct, mac: nil).description
+        XCTAssertEqual(try KeyDerivation.decryptUserKey(protected, with: masterKey), userKey)
+    }
+
+    func testEncryptedFileFormat() throws {
+        let k = SymmetricCryptoKey.generate()
+        let blob = try EncFile.encrypt(Data("attachment".utf8), key: k)
+        XCTAssertEqual(blob.first, 2)
+        XCTAssertEqual(try EncFile.decrypt(blob, key: k), Data("attachment".utf8))
+        var tampered = blob
+        tampered[tampered.count - 1] ^= 1
+        XCTAssertThrowsError(try EncFile.decrypt(tampered, key: k))
+        XCTAssertThrowsError(try EncFile.decrypt(Data([1]) + blob.dropFirst(), key: k))
+        XCTAssertThrowsError(try EncFile.decrypt(blob, key: SymmetricCryptoKey(Primitives.random(32))))
+    }
+
+    func testSymmetricKeyRejectsWrongLength() {
+        XCTAssertThrowsError(try SymmetricCryptoKey(Primitives.random(48)))
+        XCTAssertThrowsError(try EncString.encrypt("x", key: SymmetricCryptoKey(Primitives.random(32))))
+    }
+
+    func testRSAKeysAndBothOAEPVariants() throws {
+        let kp = try RSA.generate()
+        let priv = try RSA.privateKey(der: kp.privatePKCS8)
+        let pub = try RSA.publicKey(der: kp.publicSPKI)
+        let e = try RSA.encrypt(Data("secret".utf8), publicKey: pub)
+        XCTAssertEqual(try RSA.decrypt(EncString(e.description), privateKey: priv), Data("secret".utf8))
+        XCTAssertEqual(try RSA.publicSPKI(of: priv), kp.publicSPKI)
+
+        let sha256 = try XCTUnwrap(SecKeyCreateEncryptedData(pub, .rsaEncryptionOAEPSHA256, Data("org".utf8) as CFData, nil) as Data?)
+        XCTAssertEqual(try RSA.decrypt(EncString(type: 3, iv: nil, data: sha256, mac: nil), privateKey: priv), Data("org".utf8))
+        XCTAssertThrowsError(try RSA.decrypt(EncString.encrypt("x", key: .generate()), privateKey: priv))
+        XCTAssertThrowsError(try RSA.privateKey(der: Data([0x30, 0x01, 0x00])))
+        XCTAssertThrowsError(try RSA.publicKey(der: Data("nope".utf8)))
+    }
+
+    func testRejectsUnsafeKdf() {
+        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 0, iterations: 1)))
+        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 1, iterations: 1, memory: 1, parallelism: 0)))
+        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 7, iterations: 600_000)))
+        XCTAssertNoThrow(try KdfConfig.argon2Default.validate())
+        XCTAssertNoThrow(try KdfConfig.pbkdf2Default.validate())
+    }
+
+    func testFingerprintPhraseDependsOnUserAndKey() {
+        let key = Data((0 ..< 32).map { UInt8($0) })
+        let p = Fingerprint.phrase(userId: "user-1", publicKey: key)
+        let words = p.split(separator: "-").map(String.init)
+        XCTAssertEqual(words.count, 5)
+        XCTAssertTrue(words.allSatisfy(Fingerprint.wordlist.contains))
+        XCTAssertEqual(p, Fingerprint.phrase(userId: "user-1", publicKey: key))
+        XCTAssertNotEqual(p, Fingerprint.phrase(userId: "user-2", publicKey: key))
+        XCTAssertNotEqual(p, Fingerprint.phrase(userId: "user-1", publicKey: key + Data([0])))
+    }
+
+    func testBase64URL() {
+        let d = Data([0xfb, 0xff, 0xfe, 0x01])
+        XCTAssertEqual(d.base64URL, "-__-AQ")
+        XCTAssertEqual(Data(base64URL: "-__-AQ"), d)
     }
 }

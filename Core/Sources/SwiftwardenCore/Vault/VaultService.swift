@@ -171,7 +171,10 @@ public final class VaultService: @unchecked Sendable {
             token = try await requestRegistration(api: api, email: email, name: name)
             guard token != nil else { throw APIError.http(0, "Check your email and paste the verification link to finish creating the account.") }
         }
-        if let t = token, let q = URLComponents(string: t)?.queryItems?.first(where: { $0.name == "token" })?.value { token = q }
+        if let t = token, let c = URLComponents(string: t) {
+            let items = c.queryItems ?? c.fragment.flatMap { URLComponents(string: $0)?.queryItems }
+            if let q = items?.first(where: { $0.name == "token" })?.value { token = q }
+        }
         let mk = try KeyDerivation.masterKey(password: password, email: email, kdf: kdf)
         let hash = try KeyDerivation.masterPasswordHash(password: password, masterKey: mk)
         let uk = SymmetricCryptoKey.generate()

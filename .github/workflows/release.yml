@@ -26,6 +26,12 @@ jobs:
         working-directory: Core
         run: swift test
 
+      - name: Test app
+        run: |
+          xcodegen generate
+          xcodebuild test -project Swiftwarden.xcodeproj -scheme Swiftwarden -destination 'platform=macOS' \
+            -derivedDataPath build/tests CODE_SIGN_IDENTITY=- -quiet
+
       - name: Build
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
