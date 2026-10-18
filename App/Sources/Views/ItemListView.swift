@@ -24,6 +24,8 @@ struct ItemListView: View {
             }
             if model.sidebar == .security { SecurityFooter() }
         }
+        .id(model.sidebar)
+        .transaction { $0.animation = nil }
         .task(id: model.sidebar) {
             if model.sidebar == .security, Prefs.d.bool(forKey: Prefs.detectCompromised), !model.health.exposedChecked {
                 await model.checkExposed()
@@ -263,7 +265,7 @@ struct ItemMenu: View {
                 if let t = cipher.login?.totp, let o = TOTP(t) {
                     Button("Copy Verification Code") { model.copy(o.code(), "code") }
                 }
-                if let h = cipher.login?.uris?.first?.uri, let u = URL(string: h.contains("://") ? h : "https://" + h) {
+                if let u = cipher.login?.uris?.lazy.compactMap({ URLMatcher.launchURL($0.uri) }).first {
                     Button("Open Website") { NSWorkspace.shared.open(u) }
                 }
             }
@@ -312,6 +314,7 @@ struct PendingReprompt: Identifiable {
     let id: String
     let action: () -> Void
 }
+
 
 
 

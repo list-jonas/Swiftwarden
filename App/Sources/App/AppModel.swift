@@ -96,7 +96,9 @@ final class AppModel {
     }
     var checkingExposed = false
     @ObservationIgnored private var dataVersion = 0
-    @ObservationIgnored private var baseCache: (key: String, items: [Cipher])?
+    @ObservationIgnored private var sectionCache: [String: [Cipher]] = [:]
+    @ObservationIgnored private var sectionCacheVersion = ""
+    @ObservationIgnored private var sortedAll: [Cipher] = []
     @ObservationIgnored private var lastRevision: Double?
     var folders: [Folder] = []
     var collections: [Collection] = []
@@ -111,6 +113,7 @@ final class AppModel {
 
     var syncing = false
     var errorMessage: String?
+    var unlockNotice: String?
     var toast: Toast?
 
     var sidebar: SidebarItem? = .all
@@ -131,12 +134,15 @@ final class AppModel {
     @ObservationIgnored let deviceId = Store.deviceId
     @ObservationIgnored private var pinEphemeralKey: Data?
     @ObservationIgnored private var clipboardTask: Task<Void, Never>?
+    @ObservationIgnored private var clipboardChange: Int?
     @ObservationIgnored private var timers: [Timer] = []
+    static let maxPinAttempts = 5
 
     init() {
         Prefs.register()
         account = Store.loadAccount()
         phase = account == nil ? .loggedOut : .locked
+        migrateBiometricKey()
         startTimers()
     }
 
@@ -225,12 +231,31 @@ final class AppModel {
     }
 
     func unlockWithBiometrics() async -> Bool {
-        guard let a = account, Prefs.d.bool(forKey: Prefs.biometricUnlock) else { return false }
-        guard await Biometrics.authenticate("unlock your vault") else { return false }
-        guard let raw = Keychain.get("bio.\(a.userId)"), let uk = try? SymmetricCryptoKey(raw) else { return false }
+        guard let a = account, Prefs.d.bool(forKey: Prefs.biometricUnlock), let blob = Keychain.get("bio.\(a.userId)") else { return false }
+        guard let ctx = await Biometrics.context("unlock your vault") else { return false }
+        let raw: Data
+        if BioKey.isLegacy(blob) {
+            raw = blob
+            if let sealed = try? BioKey.seal(blob) { Keychain.set(sealed, for: "bio.\(a.userId)") }
+        } else {
+            do { raw = try BioKey.open(blob, context: ctx) } catch {
+                Keychain.delete("bio.\(a.userId)")
+                Prefs.d.set(false, forKey: Prefs.biometricUnlock)
+                unlockNotice = "Touch ID unlock was turned off because your fingerprints changed. Unlock with your master password, then turn it on again in Settings."
+                return false
+            }
+        }
+        guard let uk = try? SymmetricCryptoKey(raw) else { return false }
         await didUnlock(uk)
         return true
     }
+
+    private func migrateBiometricKey() {
+        guard let a = account, let blob = Keychain.get("bio.\(a.userId)"), BioKey.isLegacy(blob) else { return }
+        if let sealed = try? BioKey.seal(blob) { Keychain.set(sealed, for: "bio.\(a.userId)") }
+    }
+
+    var pinAttemptsLeft: Int { Self.maxPinAttempts - Prefs.d.integer(forKey: "pinFailures") }
 
     func unlock(pin: String) async throws {
         guard let a = account else { return }
@@ -238,10 +263,25 @@ final class AppModel {
         if let p = a.pinProtectedUserKey { prot = p }
         else if let e = pinEphemeralKey, let s = String(data: e, encoding: .utf8) { prot = s }
         else { throw CryptoError.invalidKey }
-        let uk = try await Task.detached { () throws -> SymmetricCryptoKey in
-            let key = try KeyDerivation.deriveKey(secret: pin, salt: a.email.lowercased(), kdf: a.kdf)
-            return try KeyDerivation.decryptUserKey(prot, with: key)
-        }.value
+        let uk: SymmetricCryptoKey
+        do {
+            uk = try await Task.detached { () throws -> SymmetricCryptoKey in
+                let key = try KeyDerivation.deriveKey(secret: pin, salt: a.email.lowercased(), kdf: a.kdf)
+                return try KeyDerivation.decryptUserKey(prot, with: key)
+            }.value
+        } catch {
+            let failures = Prefs.d.integer(forKey: "pinFailures") + 1
+            Prefs.d.set(failures, forKey: "pinFailures")
+            if failures >= Self.maxPinAttempts {
+                var acc = a
+                acc.pinProtectedUserKey = nil
+                pinEphemeralKey = nil
+                account = acc
+                Store.save(acc)
+                Prefs.d.removeObject(forKey: "pinFailures")
+            }
+            throw error
+        }
         await didUnlock(uk)
     }
 
@@ -252,6 +292,8 @@ final class AppModel {
 
     private func didUnlock(_ uk: SymmetricCryptoKey) async {
         guard let a = account else { return }
+        Prefs.d.removeObject(forKey: "pinFailures")
+        unlockNotice = nil
         let api = makeAPI(a.env)
         api.tokens = Keychain.getCodable(Tokens.self, "tokens.\(a.userId)")
         wire(api)
@@ -295,7 +337,7 @@ final class AppModel {
         guard let a = account, let uk = service?.keys.userKey else { return false }
         if on {
             guard await Biometrics.authenticate("enable unlock with Touch ID") else { return false }
-            Keychain.set(uk.data, for: "bio.\(a.userId)")
+            guard let sealed = try? BioKey.seal(uk.data), Keychain.set(sealed, for: "bio.\(a.userId)") else { return false }
         } else {
             Keychain.delete("bio.\(a.userId)")
         }
@@ -310,6 +352,7 @@ final class AppModel {
             account = a; Store.save(a); return
         }
         guard let uk = service?.keys.userKey else { return }
+        Prefs.d.removeObject(forKey: "pinFailures")
         let email = a.email, kdf = a.kdf
         let prot = try await Task.detached { () throws -> String in
             let key = try KeyDerivation.deriveKey(secret: pin, salt: email.lowercased(), kdf: kdf)
@@ -492,13 +535,19 @@ final class AppModel {
         let q = (query ?? search).trimmingCharacters(in: .whitespaces).lowercased()
         _ = ciphers.count
         _ = health.exposedChecked
-        let key = "\(String(describing: s))|\(sort.rawValue)|\(dataVersion)"
+        let version = "\(sort.rawValue)|\(dataVersion)"
+        if version != sectionCacheVersion {
+            sectionCache = [:]
+            sortedAll = sortedCiphers()
+            sectionCacheVersion = version
+        }
+        let key = String(describing: s)
         var out: [Cipher]
-        if let c = baseCache, c.key == key {
-            out = c.items
+        if let c = sectionCache[key] {
+            out = c
         } else {
             out = baseItems(for: s)
-            baseCache = (key, out)
+            sectionCache[key] = out
         }
         if !q.isEmpty {
             let terms = q.split(separator: " ")
@@ -507,12 +556,23 @@ final class AppModel {
         return out
     }
 
+    private func sortedCiphers() -> [Cipher] {
+        switch sort {
+        case .name:
+            let names = ciphers.map(\.displayName)
+            let order = names.indices.sorted { names[$0].localizedStandardCompare(names[$1]) == .orderedAscending }
+            return order.map { ciphers[$0] }
+        case .modified: return ciphers.sorted { ($0.revisionDate ?? "") > ($1.revisionDate ?? "") }
+        case .created: return ciphers.sorted { ($0.creationDate ?? "") > ($1.creationDate ?? "") }
+        }
+    }
+
     private func baseItems(for s: SidebarItem?) -> [Cipher] {
         var out: [Cipher]
         switch s ?? .all {
-        case .trash: out = ciphers.filter(\.isDeleted)
+        case .trash: out = sortedAll.filter(\.isDeleted)
         case let x:
-            out = ciphers.filter { c in
+            out = sortedAll.filter { c in
                 guard !c.isDeleted else { return false }
                 switch x {
                 case .favorites: return c.isFavorite
@@ -527,11 +587,6 @@ final class AppModel {
                 default: return true
                 }
             }
-        }
-        switch sort {
-        case .name: out.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        case .modified: out.sort { ($0.revisionDate ?? "") > ($1.revisionDate ?? "") }
-        case .created: out.sort { ($0.creationDate ?? "") > ($1.creationDate ?? "") }
         }
         if s == .security {
             let rank = Dictionary(uniqueKeysWithValues: out.map { ($0.id, issues($0).map(\.rank).min() ?? 9) })
@@ -576,9 +631,9 @@ final class AppModel {
         }
     }
 
-    func matches(bundleId: String, appName: String) -> [Cipher] {
+    func matches(bundleId: String, appName: String, heuristics: Bool) -> [Cipher] {
         ciphers.filter { c in
-            !c.isDeleted && c.type == .login && (c.login?.uris ?? []).contains { URLMatcher.matchesApp($0, bundleId: bundleId, appName: appName) }
+            !c.isDeleted && c.type == .login && (c.login?.uris ?? []).contains { URLMatcher.matchesApp($0, bundleId: bundleId, appName: appName, heuristics: heuristics) }
         }
     }
 
@@ -661,13 +716,20 @@ final class AppModel {
         if toast { showToast("Copied \(label)") }
         let secs = Prefs.d.integer(forKey: Prefs.clearClipboard)
         clipboardTask?.cancel()
+        clipboardChange = sensitive ? pb.changeCount : nil
         guard sensitive, secs > 0 else { return }
         let change = pb.changeCount
         clipboardTask = Task {
             try? await Task.sleep(for: .seconds(secs))
             guard !Task.isCancelled, pb.changeCount == change else { return }
             pb.clearContents()
+            clipboardChange = nil
         }
+    }
+
+    func clearPendingClipboard() {
+        guard let c = clipboardChange, Prefs.d.integer(forKey: Prefs.clearClipboard) > 0, NSPasteboard.general.changeCount == c else { return }
+        NSPasteboard.general.clearContents()
     }
 
     func showToast(_ s: String) {
@@ -729,6 +791,7 @@ final class AppModel {
         if idle >= Double(mins * 60) { lock() }
     }
 }
+
 
 
 
