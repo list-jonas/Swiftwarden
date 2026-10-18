@@ -17,6 +17,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="GPL-3.0"></a>
 </p>
 
+
+<p align="center">
+  <img src="docs/screenshot.png" width="900" alt="Swiftwarden showing a vault with logins, cards and notes, and the GitHub login with a live verification code">
+</p>
+
 ---
 
 Swiftwarden works with **bitwarden.com**, **bitwarden.eu** and **self-hosted** servers (official Bitwarden or Vaultwarden). It runs quietly in the menu bar, fills logins into browsers and native apps through the macOS Accessibility API, and keeps everything end-to-end encrypted exactly like the official clients.
