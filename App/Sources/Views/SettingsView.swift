@@ -160,9 +160,178 @@ struct AutofillSettings: View {
             }
             Toggle("Press Return after filling", isOn: $submit)
             Toggle("Copy verification code after filling", isOn: $copyTotp)
+            AutofillScopeSection()
+            TrustedBrowsersSection()
         }
         .formStyle(.grouped)
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in trusted = AXIsProcessTrusted() }
+    }
+}
+
+struct AutofillScopeSection: View {
+    @State private var scope = AutofillPolicy.scope
+    @State private var denied = AutofillPolicy.denied
+    @State private var allowed = AutofillPolicy.allowed
+
+    private var list: Binding<[AppEntry]> { scope == .only ? $allowed : $denied }
+
+    var body: some View {
+        Section {
+            Picker("Autofill in", selection: $scope) {
+                ForEach(AutofillScope.allCases) { Text($0.title).tag($0) }
+            }
+            if scope != .all {
+                ForEach(list.wrappedValue) { e in
+                    AppEntryRow(entry: e) { list.wrappedValue.removeAll { $0.id == e.id } }
+                }
+                if list.wrappedValue.isEmpty {
+                    Text(scope == .only ? "Autofill stays off everywhere until you add an app." : "No apps excluded yet.")
+                        .foregroundStyle(.secondary)
+                }
+                AddAppButton(title: "Add App…", excluding: Set(list.wrappedValue.map(\.id))) { url in
+                    guard let e = AutofillPolicy.entry(at: url), e.bundleId != Flavor.bundleId,
+                          !list.wrappedValue.contains(where: { $0.id == e.id }) else { return nil }
+                    list.wrappedValue.append(e)
+                    list.wrappedValue.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                    return nil
+                }
+            }
+        } header: {
+            Text("Where to Autofill")
+        } footer: {
+            Text(scope == .only ? "Suggestions and the quick fill shortcut only work in the apps and browsers listed here."
+                 : scope == .except ? "Swiftwarden never offers to fill in the apps listed here." : "Swiftwarden offers to fill in every app and trusted browser.")
+                .font(.caption)
+        }
+        .onChange(of: scope) { AutofillPolicy.scope = scope }
+        .onChange(of: denied) { AutofillPolicy.denied = denied }
+        .onChange(of: allowed) { AutofillPolicy.allowed = allowed }
+    }
+}
+
+struct TrustedBrowsersSection: View {
+    @State private var trusted = AutofillPolicy.trustedBrowsers
+    @State private var builtIn = AutofillPolicy.builtInInstalled
+    @State private var showBuiltIn = false
+    @State private var error: String?
+
+    var body: some View {
+        Section {
+            ForEach(trusted) { e in
+                AppEntryRow(entry: e, detail: e.team.map { $0 == "apple" ? "Signed by Apple" : "Team \($0)" }) {
+                    trusted.removeAll { $0.id == e.id }
+                }
+            }
+            AddAppButton(title: "Add Browser…", excluding: Set(trusted.map(\.id)).union(builtIn.map(\.id))) { url in
+                guard let e = AutofillPolicy.entry(at: url) else { return "That doesn't look like an app." }
+                if AutofillPolicy.isBuiltInBrowser(e.bundleId) { return "\(e.name) is already supported." }
+                if e.bundleId == Flavor.bundleId || trusted.contains(where: { $0.id == e.id }) { return nil }
+                guard e.team != nil else {
+                    return "\(e.name) isn't signed by an identified developer, so Swiftwarden can't verify the website addresses it reports."
+                }
+                trusted.append(e)
+                trusted.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                return nil
+            }
+            DisclosureGroup("Built-in browsers (\(builtIn.count) installed)", isExpanded: $showBuiltIn) {
+                ForEach(builtIn) { AppEntryRow(entry: $0) }
+            }
+        } header: {
+            Text("Trusted Browsers")
+        } footer: {
+            Text("Swiftwarden matches logins by website only in browsers it trusts. Each browser you add is pinned to its developer's signature; if that changes, Swiftwarden stops filling there.")
+                .font(.caption)
+        }
+        .onChange(of: trusted) { AutofillPolicy.trustedBrowsers = trusted }
+        .alert("Can't Add Browser", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK") { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
+        .environment(\.addAppError, { error = $0 })
+    }
+}
+
+private struct AddAppErrorKey: EnvironmentKey {
+    static let defaultValue: (String) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var addAppError: (String) -> Void {
+        get { self[AddAppErrorKey.self] }
+        set { self[AddAppErrorKey.self] = newValue }
+    }
+}
+
+struct AppEntryRow: View {
+    let entry: AppEntry
+    var detail: String?
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: entry.icon).resizable().frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name)
+                Text(detail ?? entry.bundleId).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let onRemove {
+                Button(action: onRemove) { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                    .help("Remove")
+            }
+        }
+    }
+}
+
+struct AddAppButton: View {
+    let title: String
+    let excluding: Set<String>
+    let onPick: (URL) -> String?
+    @Environment(\.addAppError) private var report
+    @State private var running = AutofillPolicy.runningApps
+
+    var body: some View {
+        Menu(title) {
+            let apps = running.filter { !excluding.contains($0.id) && $0.path != nil }
+            if !apps.isEmpty {
+                Section("Open Apps") {
+                    ForEach(apps) { e in
+                        Button {
+                            pick(URL(fileURLWithPath: e.path!))
+                        } label: {
+                            Label { Text(e.name) } icon: { Image(nsImage: small(e.icon)) }
+                        }
+                    }
+                }
+            }
+            Button("Choose App…") { choose() }
+        }
+        .fixedSize()
+        .onAppear { running = AutofillPolicy.runningApps }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in running = AutofillPolicy.runningApps }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in running = AutofillPolicy.runningApps }
+    }
+
+    private func small(_ i: NSImage) -> NSImage {
+        let c = i.copy() as! NSImage
+        c.size = NSSize(width: 16, height: 16)
+        return c
+    }
+
+    private func pick(_ url: URL) {
+        if let msg = onPick(url) { report(msg) }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        panel.urls.forEach(pick)
     }
 }
 

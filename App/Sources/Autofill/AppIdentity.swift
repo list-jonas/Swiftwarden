@@ -51,12 +51,29 @@ enum AppIdentity {
 
     static func isSigned(_ app: NSRunningApplication) -> Bool { info(app).signed }
 
+    static func staticTeam(_ url: URL) -> String? {
+        var stat: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &stat) == errSecSuccess, let stat else { return nil }
+        func passes(_ req: String) -> Bool {
+            var r: SecRequirement?
+            guard SecRequirementCreateWithString(req as CFString, [], &r) == errSecSuccess, let r else { return false }
+            return SecStaticCodeCheckValidity(stat, SecCSFlags(rawValue: kSecCSDoNotValidateResources), r) == errSecSuccess
+        }
+        guard passes("anchor apple generic") else { return nil }
+        var dict: CFDictionary?
+        if SecCodeCopySigningInformation(stat, SecCSFlags(rawValue: kSecCSSigningInformation), &dict) == errSecSuccess,
+           let team = (dict as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String {
+            return team
+        }
+        return passes("anchor apple") ? "apple" : nil
+    }
+
     static func isVerifiedBrowser(_ app: NSRunningApplication) -> Bool {
-        guard let bid = app.bundleIdentifier,
-              AutofillController.browsers.contains(bid) || AutofillController.chromiumBrowsers.contains(bid) else { return false }
+        guard let bid = app.bundleIdentifier, AutofillPolicy.isBrowser(bid) else { return false }
         let i = info(app)
         guard i.signed, let team = i.team else { return false }
         if let pinned = pinnedTeams[bid] { return pinned == team }
+        if !AutofillPolicy.isBuiltInBrowser(bid), let trusted = AutofillPolicy.trustedTeam(bid) { return trusted == team }
         let key = "browserTeam.\(bid)"
         if let seen = UserDefaults.standard.string(forKey: key) { return seen == team }
         UserDefaults.standard.set(team, forKey: key)

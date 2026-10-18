@@ -109,10 +109,11 @@ final class AutofillController {
         suggestions.hide()
         detach()
         guard enabled, trusted, let app, app.processIdentifier != getpid() else { return }
+        guard AutofillPolicy.allows(app.bundleIdentifier) else { return }
         let pid = app.processIdentifier
         let appEl = AXUIElementCreateApplication(pid)
         let bid = app.bundleIdentifier ?? ""
-        if Self.chromiumBrowsers.contains(bid) || (Self.browsers.contains(bid) && !bid.hasPrefix("com.apple.")) {
+        if AutofillPolicy.isBrowser(bid) && !bid.hasPrefix("com.apple.") {
             AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         }
         var obs: AXObserver?
@@ -130,11 +131,11 @@ final class AutofillController {
 
     func currentTarget(requireLoginField: Bool = true) -> FillTarget? {
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return nil }
+        guard AutofillPolicy.allows(app.bundleIdentifier) else { return nil }
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         guard let el = AX.element(appEl, kAXFocusedUIElementAttribute) else { return nil }
-        let bundle = app.bundleIdentifier ?? ""
-        let isBrowserApp = Self.browsers.contains(bundle) || Self.chromiumBrowsers.contains(bundle) || AppIdentity.isVerifiedBrowser(app)
-        if isBrowserApp, AX.webArea(of: el) == nil { return nil }
+        let claimsBrowser = AutofillPolicy.isBrowser(app.bundleIdentifier)
+        if claimsBrowser, AX.webArea(of: el) == nil { return nil }
         if AX.isSearch(el) { return nil }
         let secure = AX.isSecure(el)
         guard secure || AX.isTextInput(el) || !requireLoginField else { return nil }
@@ -147,8 +148,6 @@ final class AutofillController {
         if requireLoginField, kind == .unknown { return nil }
         let frame = AX.frame(el) ?? CGRect(x: NSScreen.main?.frame.midX ?? 400, y: NSScreen.main?.frame.midY ?? 400, width: 1, height: 1)
         let browser = AppIdentity.isVerifiedBrowser(app)
-        let bid = app.bundleIdentifier ?? ""
-        let claimsBrowser = Self.browsers.contains(bid) || Self.chromiumBrowsers.contains(bid)
         let signed = browser || (!claimsBrowser && AppIdentity.isSigned(app))
         return FillTarget(app: app, element: el, kind: kind, frame: frame, url: signed ? Self.webURL(el, browser: browser) : nil, verifiedBrowser: browser, signed: signed)
     }
@@ -200,7 +199,7 @@ final class AutofillController {
         guard m.phase == .unlocked else { return [] }
         if t.kind.isCard { return m.items(for: .type(.card), query: "") }
         if t.kind.isIdentity { return m.items(for: .type(.identity), query: "") }
-        let isBrowser = Self.browsers.contains(t.app.bundleIdentifier ?? "") || Self.chromiumBrowsers.contains(t.app.bundleIdentifier ?? "")
+        let isBrowser = AutofillPolicy.isBrowser(t.app.bundleIdentifier)
         let logins: [Cipher]
         if let u = t.url { logins = m.matches(url: u) }
         else if isBrowser { logins = [] }
@@ -257,7 +256,7 @@ final class AutofillController {
 
     func rememberURI(for t: FillTarget) -> String? {
         let bid = t.app.bundleIdentifier ?? ""
-        let isBrowserApp = Self.browsers.contains(bid) || Self.chromiumBrowsers.contains(bid)
+        let isBrowserApp = AutofillPolicy.isBrowser(bid)
         if let u = t.url, let host = URLMatcher.host(of: u) {
             return (u.lowercased().hasPrefix("http://") ? "http://" : "https://") + host
         }
@@ -311,6 +310,11 @@ final class AutofillController {
 
     func hotKeyPressed() {
         guard trusted else { requestPermission(); return }
+        if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
+           !AutofillPolicy.allows(app.bundleIdentifier) {
+            NSSound.beep()
+            return
+        }
         let t = currentTarget(requireLoginField: false)
         guard let t else {
             NSApp.activate(ignoringOtherApps: true)
