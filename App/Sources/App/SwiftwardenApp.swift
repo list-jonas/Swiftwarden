@@ -8,7 +8,7 @@ struct SwiftwardenApp: App {
     @AppStorage(Prefs.menuBarIcon) private var menuBar = true
 
     var body: some Scene {
-        Window("Swiftwarden", id: "main") {
+        Window(Flavor.name, id: "main") {
             RootView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)
@@ -46,7 +46,7 @@ struct SwiftwardenApp: App {
             SettingsView().environment(model)
         }
 
-        MenuBarExtra("Swiftwarden", systemImage: "lock.shield", isInserted: $menuBar) {
+        MenuBarExtra(Flavor.name, systemImage: Flavor.isDev ? "hammer" : "lock.shield", isInserted: $menuBar) {
             MenuBarView().environment(model)
         }
         .menuBarExtraStyle(.window)
@@ -58,10 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             applyAppearance(Prefs.d.string(forKey: Prefs.appearance) ?? "system")
             AutofillController.shared.start()
+            BackgroundMode.shared.start()
         }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        !Prefs.d.bool(forKey: Prefs.menuBarIcon)
+        false
     }
 }

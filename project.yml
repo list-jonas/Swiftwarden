@@ -25,7 +25,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Swiftwarden
+        CFBundleDisplayName: $(PRODUCT_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
@@ -42,10 +42,17 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
       configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.listjonas.swiftwarden.dev
+          PRODUCT_NAME: Swiftwarden Dev
+          PRODUCT_MODULE_NAME: Swiftwarden
+          ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
+          EXCLUDED_SOURCE_FILE_NAMES: AppIcon.icon
         Release:
+          ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+          EXCLUDED_SOURCE_FILE_NAMES: AppIconDev.icon
           DEPLOYMENT_POSTPROCESSING: YES
           STRIP_INSTALLED_PRODUCT: YES
           STRIP_STYLE: all

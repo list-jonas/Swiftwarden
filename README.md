@@ -17,16 +17,21 @@ The release app is about 5 MB (universal arm64 + x86_64) and has no third-party 
 - **Import / export**: Bitwarden JSON, CSV and password-protected JSON; generic CSV from Chrome, Edge, Firefox, Safari, 1Password and others.
 - **Autofill in other apps**: when a password (or username) field gets focus in any app, a small panel offers matching logins. Websites are matched by the browser's page URL, native apps by bundle id or name (store `macapp://com.example.app` as a URI for an exact match). The quick-fill shortcut (default ⇧⌘L) opens a searchable palette for the focused field. Fill by typing keystrokes, setting the field value, or pasting.
 - **Menu bar**: search, copy username/password/code, generate a password, lock.
-- **Other**: fingerprint phrase, launch at login, clipboard auto-clear (marked concealed for clipboard managers), website icons, appearance.
+- **Background**: closing the window keeps Swiftwarden running in the menu bar (no Dock icon) so autofill keeps working. Launch at login is on after the first start from /Applications and starts hidden.
+- **Other**: fingerprint phrase, clipboard auto-clear (marked concealed for clipboard managers), website icons, appearance.
 
 ## Build
 
-Requirements: Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+Requirements: Xcode 26 or later (Liquid Glass `.icon` app icon) and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
+    scripts/install.sh          # Release build, installs /Applications/Swiftwarden.app and starts it
+    scripts/dev.sh              # Debug build "Swiftwarden Dev", runs next to the installed app
     scripts/build.sh            # Release build into dist/Swiftwarden.app
-    scripts/build.sh Debug
+    scripts/build.sh Debug      # dist/Swiftwarden Dev.app
 
-Without `SIGN_IDENTITY` the app is ad-hoc signed and macOS asks for Accessibility access again after every build. Sign with a stable identity to keep it:
+The Debug configuration is a separate app: bundle id `com.listjonas.swiftwarden.dev`, its own settings, keychain items, data folder, orange icon, hammer menu bar icon and ⌥⌘L as quick-fill shortcut. Running from Xcode builds it too, so the installed app stays untouched while you work. The icons live in `App/Resources/AppIcon.icon` and `AppIconDev.icon` (open them in Icon Composer).
+
+Without `SIGN_IDENTITY` the app is ad-hoc signed and macOS asks for Accessibility access again after every build. Sign with a stable identity to keep it (`install.sh` picks your first Developer ID identity automatically):
 
     SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" scripts/build.sh
 

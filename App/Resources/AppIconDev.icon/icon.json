@@ -1,0 +1,82 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:1.00000,0.70000,0.20000,1.00000",
+      "display-p3:0.88000,0.32000,0.06000,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "half.svg",
+          "name": "half",
+          "glass": true,
+          "fill": {
+            "automatic-gradient": "srgb:1.00000,1.00000,1.00000,1.00000"
+          },
+          "position": {
+            "scale": 0.86,
+            "translation-in-points": [
+              0,
+              6
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      },
+      "specular": true
+    },
+    {
+      "layers": [
+        {
+          "image-name": "shield.svg",
+          "name": "shield",
+          "glass": true,
+          "fill": {
+            "automatic-gradient": "display-p3:1.00000,0.92000,0.78000,1.00000"
+          },
+          "position": {
+            "scale": 0.86,
+            "translation-in-points": [
+              0,
+              6
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.6
+      },
+      "specular": true,
+      "blur-material": 0.5
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

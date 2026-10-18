@@ -32,7 +32,7 @@ enum Prefs {
         UserDefaults.standard.register(defaults: [
             timeoutMinutes: 15, timeoutAction: "lock", lockOnSleep: true, lockOnScreenLock: true, biometricUnlock: false,
             clearClipboard: 30, showIcons: true, autofillEnabled: true, autofillSuggestions: true, fillMethod: "type",
-            autoSubmit: false, copyTotpAfterFill: true, hotkey: "cmdShiftL", menuBarIcon: true, pinRequireMasterOnRestart: false,
+            autoSubmit: false, copyTotpAfterFill: true, hotkey: Flavor.isDev ? "optCmdL" : "cmdShiftL", menuBarIcon: true, pinRequireMasterOnRestart: false,
             defaultUriMatch: 0, detectCompromised: true, generatorType: "password", usernameType: "word", appearance: "system",
         ])
     }

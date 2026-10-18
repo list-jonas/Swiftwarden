@@ -17,13 +17,13 @@ struct StoredAccount: Codable, Equatable {
 
 enum Paths {
     static let support: URL = {
-        let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Swiftwarden", isDirectory: true)
+        let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(Flavor.name, isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return u
     }()
 
     static let caches: URL = {
-        let u = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Swiftwarden", isDirectory: true)
+        let u = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(Flavor.name, isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }()
@@ -57,7 +57,7 @@ enum Store {
 }
 
 enum Keychain {
-    static let service = "com.listjonas.swiftwarden"
+    static let service = Flavor.bundleId
 
     @discardableResult
     static func set(_ data: Data, for account: String) -> Bool {
