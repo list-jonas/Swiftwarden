@@ -49,8 +49,14 @@ final class AutofillTests: AppTestCase {
         XCTAssertNil(AutofillController.pinValue(item("b", "None"), hints: nil))
     }
 
-    func target(_ url: String?, kind: FieldKind = .password, signed: Bool = true) -> FillTarget {
-        FillTarget(app: .current, element: AXUIElementCreateSystemWide(), kind: kind, frame: .zero, url: url, verifiedBrowser: url != nil, signed: signed)
+    func target(_ url: String?, kind: FieldKind = .password, signed: Bool = true, app: NSRunningApplication = .current) -> FillTarget {
+        FillTarget(app: app, element: AXUIElementCreateSystemWide(), kind: kind, frame: .zero, url: url, verifiedBrowser: url != nil, signed: signed)
+    }
+
+    func nativeApp() throws -> NSRunningApplication {
+        let apps = NSWorkspace.shared.runningApplications
+        return try XCTUnwrap(apps.first { $0.bundleIdentifier == "com.apple.finder" }
+            ?? apps.first { ($0.bundleIdentifier ?? "").hasPrefix("com.apple.") && !AutofillPolicy.isBrowser($0.bundleIdentifier) })
     }
 
     func testCandidatesFitTheFocusedField() {
@@ -75,11 +81,12 @@ final class AutofillTests: AppTestCase {
 
     func testOffersToRememberOnlyNewPlaces() throws {
         let ac = AutofillController.shared
-        let bid = try XCTUnwrap(NSRunningApplication.current.bundleIdentifier)
+        let app = try nativeApp()
+        let bid = try XCTUnwrap(app.bundleIdentifier)
         XCTAssertEqual(ac.rememberURI(for: target("http://intranet.local:8080/login?x=1")), "http://intranet.local")
         XCTAssertEqual(ac.rememberPlace(for: target("https://www.github.com/login")), "www.github.com")
-        XCTAssertEqual(ac.rememberURI(for: target(nil)), "macapp://" + bid)
-        XCTAssertNil(ac.rememberURI(for: target(nil, signed: false)))
+        XCTAssertEqual(ac.rememberURI(for: target(nil, app: app)), "macapp://" + bid)
+        XCTAssertNil(ac.rememberURI(for: target(nil, signed: false, app: app)))
 
         model.phase = .unlocked
         var readOnly = item("ro", "Shared", uri: "https://example.com")
@@ -92,13 +99,13 @@ final class AutofillTests: AppTestCase {
         XCTAssertTrue(ac.shouldOfferToRemember(other, t))
         XCTAssertFalse(ac.shouldOfferToRemember(readOnly, t))
         XCTAssertFalse(ac.shouldOfferToRemember(item("n", "Note", type: .secureNote), t))
-        XCTAssertFalse(ac.shouldOfferToRemember(other, target(nil, signed: false)))
-        XCTAssertTrue(ac.shouldOfferToRemember(other, target(nil)))
+        XCTAssertFalse(ac.shouldOfferToRemember(other, target(nil, signed: false, app: app)))
+        XCTAssertTrue(ac.shouldOfferToRemember(other, target(nil, app: app)))
         var remembered = other
         remembered.login?.uris?.append(LoginUri(uri: "MACAPP://" + bid))
-        XCTAssertFalse(ac.shouldOfferToRemember(remembered, target(nil)))
+        XCTAssertFalse(ac.shouldOfferToRemember(remembered, target(nil, app: app)))
 
         AutofillPolicy.trustedBrowsers = [AppEntry(bundleId: bid, name: "Me", team: "T")]
-        XCTAssertNil(ac.rememberURI(for: target(nil)))
+        XCTAssertNil(ac.rememberURI(for: target(nil, app: app)))
     }
 }
