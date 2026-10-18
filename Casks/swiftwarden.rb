@@ -1,6 +1,6 @@
 cask "swiftwarden" do
-  version "0.0.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  version "0.1.0"
+  sha256 "9d5f995fff9fd40a1e781cb92f87c1303f0b10ed1c909c195592d9300962f885"
 
   url "https://github.com/list-jonas/Swiftwarden/releases/download/v#{version}/Swiftwarden-#{version}.zip"
   name "Swiftwarden"
