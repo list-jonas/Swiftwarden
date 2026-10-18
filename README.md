@@ -35,7 +35,7 @@ Update with `brew upgrade --cask swiftwarden`. On Homebrew versions without `bre
 
 ### Manual download
 
-Grab `Swiftwarden-<version>.zip` from the [latest release](https://github.com/list-jonas/Swiftwarden/releases/latest), unzip it and move `Swiftwarden.app` to `/Applications`. The app is not signed with an Apple Developer ID, so remove the download quarantine once:
+Download `Swiftwarden-<version>.dmg` from the [latest release](https://github.com/list-jonas/Swiftwarden/releases/latest), open it and drag Swiftwarden onto the Applications folder. The app is not signed with an Apple Developer ID, so remove the download quarantine once:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Swiftwarden.app
@@ -89,6 +89,7 @@ scripts/install.sh     # Release build → /Applications/Swiftwarden.app, then s
 | `scripts/install.sh` | Builds Release, installs to `/Applications` and launches it |
 | `scripts/dev.sh` | Builds and runs **Swiftwarden Dev** next to your installed app |
 | `scripts/build.sh [Release\|Debug]` | Builds into `dist/` |
+| `scripts/dmg.sh` | Packs `dist/Swiftwarden.app` into a drag-to-install DMG (`pip3 install dmgbuild`) |
 
 To work in Xcode, run `xcodegen generate` and open `Swiftwarden.xcodeproj`.
 
@@ -133,7 +134,7 @@ SW_SEED_EMAIL=demo@test.local SW_SEED_PASSWORD='Demo-Password-123!' swift test -
 
 ## Releases
 
-CI builds and tests every push and pull request and attaches the app as a build artifact. Pushing a version tag publishes a release and updates the Homebrew cask:
+CI builds and tests every push and pull request and attaches a DMG as a build artifact. Pushing a version tag publishes a release with a DMG and a zip, and updates the Homebrew cask:
 
 ```sh
 git tag v0.2.0 && git push origin v0.2.0

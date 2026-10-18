@@ -19,8 +19,11 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_2[6-9]*.app | sort -V | tail -1)" && xcodebuild -version
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install tools
+        run: |
+          brew install xcodegen
+          python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install -q dmgbuild
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Test core
         working-directory: Core
@@ -31,10 +34,10 @@ jobs:
           xcodegen generate
           xcodebuild -project Swiftwarden.xcodeproj -scheme Swiftwarden -configuration Release -derivedDataPath build \
             -destination 'generic/platform=macOS' ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY=- build -quiet
-          ditto -c -k --keepParent build/Build/Products/Release/Swiftwarden.app Swiftwarden.zip
+          scripts/dmg.sh build/Build/Products/Release/Swiftwarden.app Swiftwarden.dmg
 
       - uses: actions/upload-artifact@v4
         with:
           name: Swiftwarden-${{ github.sha }}
-          path: Swiftwarden.zip
+          path: Swiftwarden.dmg
           retention-days: 14

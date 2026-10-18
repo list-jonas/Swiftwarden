@@ -16,8 +16,11 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_2[6-9]*.app | sort -V | tail -1)" && xcodebuild -version
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install tools
+        run: |
+          brew install xcodegen
+          python3 -m venv "$RUNNER_TEMP/venv" && "$RUNNER_TEMP/venv/bin/pip" install -q dmgbuild
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Test core
         working-directory: Core
@@ -32,13 +35,14 @@ jobs:
             -destination 'generic/platform=macOS' ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY=- \
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build -quiet
           ditto -c -k --keepParent build/Build/Products/Release/Swiftwarden.app "Swiftwarden-$VERSION.zip"
+          scripts/dmg.sh build/Build/Products/Release/Swiftwarden.app "Swiftwarden-$VERSION.dmg"
           echo "SHA256=$(shasum -a 256 "Swiftwarden-$VERSION.zip" | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "Swiftwarden-$VERSION.zip" --title "Swiftwarden $VERSION" --generate-notes --verify-tag
+          gh release create "$GITHUB_REF_NAME" "Swiftwarden-$VERSION.dmg" "Swiftwarden-$VERSION.zip" --title "Swiftwarden $VERSION" --generate-notes --verify-tag
 
       - name: Update Homebrew cask
         run: |
