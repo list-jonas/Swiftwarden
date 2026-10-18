@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_2[6-9]*.app | sort -V | tail -1)" && xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Test core
+        working-directory: Core
+        run: swift test
+
+      - name: Build app
+        run: |
+          xcodegen generate
+          xcodebuild -project Swiftwarden.xcodeproj -scheme Swiftwarden -configuration Release -derivedDataPath build \
+            -destination 'generic/platform=macOS' ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY=- build -quiet
+          ditto -c -k --keepParent build/Build/Products/Release/Swiftwarden.app Swiftwarden.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Swiftwarden-${{ github.sha }}
+          path: Swiftwarden.zip
+          retention-days: 14

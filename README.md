@@ -1,75 +1,158 @@
-# Swiftwarden
+<p align="center">
+  <img src="docs/icon.png" width="160" alt="Swiftwarden icon">
+</p>
 
-A native, dependency-free Bitwarden client for macOS written in Swift and SwiftUI. It works with bitwarden.com, bitwarden.eu and self-hosted servers (official Bitwarden or Vaultwarden), autofills logins into other Mac apps through the Accessibility API, and unlocks with Touch ID.
+<h1 align="center">Swiftwarden</h1>
 
-The release app is about 5 MB (universal arm64 + x86_64) and has no third-party dependencies: all crypto (AES-CBC + HMAC, RSA-OAEP, PBKDF2, HKDF and a pure-Swift Argon2id) uses CommonCrypto, CryptoKit and Security.framework.
+<p align="center">
+  A fast, native Bitwarden client for macOS, written in Swift and SwiftUI.<br>
+  Autofill in any app, Touch ID unlock, and a 5 MB app with zero dependencies.
+</p>
+
+<p align="center">
+  <a href="https://github.com/list-jonas/Swiftwarden/actions/workflows/ci.yml"><img src="https://github.com/list-jonas/Swiftwarden/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/list-jonas/Swiftwarden/releases/latest"><img src="https://img.shields.io/github/v/release/list-jonas/Swiftwarden?sort=semver" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-blue?logo=apple" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Swift-6-orange?logo=swift" alt="Swift 6">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="GPL-3.0"></a>
+</p>
+
+---
+
+Swiftwarden works with **bitwarden.com**, **bitwarden.eu** and **self-hosted** servers (official Bitwarden or Vaultwarden). It runs quietly in the menu bar, fills logins into browsers and native apps through the macOS Accessibility API, and keeps everything end-to-end encrypted exactly like the official clients.
+
+## Install
+
+### Homebrew
+
+```sh
+brew tap list-jonas/swiftwarden https://github.com/list-jonas/Swiftwarden
+brew trust --tap list-jonas/swiftwarden
+brew install --cask swiftwarden
+```
+
+Update with `brew upgrade --cask swiftwarden`. On Homebrew versions without `brew trust`, skip that line.
+
+### Manual download
+
+Grab `Swiftwarden-<version>.zip` from the [latest release](https://github.com/list-jonas/Swiftwarden/releases/latest), unzip it and move `Swiftwarden.app` to `/Applications`. The app is not signed with an Apple Developer ID, so remove the download quarantine once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Swiftwarden.app
+```
+
+### First start
+
+1. Log in with your server, email and master password.
+2. Grant **Accessibility** access when asked (System Settings → Privacy & Security → Accessibility). Autofill needs it.
+3. Optionally turn on Touch ID or a PIN in Settings → Security.
+
+Swiftwarden adds itself as a login item and starts hidden in the menu bar. Closing the window keeps it running so autofill keeps working; quit with ⌘Q or from the menu bar.
 
 ## Features
 
-- **Accounts**: log in with master password (PBKDF2 or Argon2id), two-step login (authenticator app, email, YubiKey OTP, remember device), new-device email verification, personal API key login, account creation, password hint.
-- **Unlock**: master password, Touch ID, PIN (optionally requiring the master password after restart), auto-lock after system idle, on sleep or on screen lock, lock or log out as timeout action.
-- **Vault**: logins, cards, identities, secure notes and SSH keys; folders; favorites; organizations and collections; trash with restore and permanent delete; custom fields (text, hidden, checkbox, linked); multiple URIs with match detection; password history; master password re-prompt; attachments (upload, download, delete); clone; move to organization; per-item cipher keys.
-- **TOTP**: live codes with countdown ring, otpauth:// and Steam keys, copy after autofill.
-- **Passkeys**: passkeys stored in Bitwarden are shown and preserved on edit.
-- **Security report**: weak, reused, http-only, and exposed passwords (Have I Been Pwned, k-anonymity).
-- **Generator**: passwords, passphrases (EFF wordlist), usernames (random word, plus-addressed, catch-all, forwarded aliases via addy.io, SimpleLogin, DuckDuckGo, Firefox Relay, Forward Email), encrypted local history.
-- **Send**: text and file Sends with deletion/expiry dates, max access count, password, hide email, disable.
-- **Import / export**: Bitwarden JSON, CSV and password-protected JSON; generic CSV from Chrome, Edge, Firefox, Safari, 1Password and others.
-- **Autofill in other apps**: when a password (or username) field gets focus in any app, a small panel offers matching logins. Websites are matched by the browser's page URL, native apps by bundle id or name (store `macapp://com.example.app` as a URI for an exact match). The quick-fill shortcut (default ⇧⌘L) opens a searchable palette for the focused field. Fill by typing keystrokes, setting the field value, or pasting.
-- **Menu bar**: search, copy username/password/code, generate a password, lock.
-- **Background**: closing the window keeps Swiftwarden running in the menu bar (no Dock icon) so autofill keeps working. Launch at login is on after the first start from /Applications and starts hidden.
-- **Other**: fingerprint phrase, clipboard auto-clear (marked concealed for clipboard managers), website icons, appearance.
+| | |
+|---|---|
+| **Autofill everywhere** | A small panel offers matching logins when a username or password field gets focus in any app. Websites match by the browser's page URL, native apps by bundle id (`macapp://com.example.app`). ⇧⌘L opens a searchable quick-fill palette. Fills by typing, setting the value, or pasting. |
+| **Unlock** | Master password, Touch ID (key sealed in the Secure Enclave), or PIN with an attempt limit. Auto-lock on idle, sleep or screen lock. |
+| **Vault** | Logins, cards, identities, secure notes and SSH keys. Folders, favorites, organizations and collections, trash, custom fields, multiple URIs with match detection, password history, master password re-prompt, attachments, per-item cipher keys. |
+| **Accounts** | PBKDF2 and Argon2id, two-step login (authenticator, email, YubiKey OTP), new-device verification, API key login, account creation. |
+| **TOTP** | Live codes with countdown ring, `otpauth://` and Steam keys, copied automatically after autofill. |
+| **Security report** | Weak, reused, insecure-URL and exposed passwords (Have I Been Pwned, k-anonymity). |
+| **Generator** | Passwords, passphrases (EFF wordlist), usernames and forwarded email aliases (addy.io, SimpleLogin, DuckDuckGo, Firefox Relay, Forward Email). |
+| **Send** | Text and file Sends with expiry, access limits and passwords. |
+| **Import / export** | Bitwarden JSON (plain and password protected), CSV, and CSV from Chrome, Edge, Firefox, Safari, 1Password and others. |
+| **Menu bar** | Search, copy username, password or code, generate a password, lock. |
 
-## Build
+## Security
 
-Requirements: Xcode 26 or later (Liquid Glass `.icon` app icon) and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+- All cryptography is implemented with CommonCrypto, CryptoKit and Security.framework: AES-CBC + HMAC, RSA-OAEP, PBKDF2, HKDF and a pure-Swift Argon2id verified against RFC 9106.
+- Your master password and decrypted vault never leave the device. The local sync cache stays encrypted with your vault keys, exactly as the server sends it.
+- Secrets are stored in the macOS Keychain with `WhenUnlockedThisDeviceOnly`. Touch ID unlock wraps the key with a Secure Enclave key bound to the current biometric set.
+- Autofill verifies the code signature of browsers before trusting the page URL they report.
+- No telemetry and no third-party code.
 
-    scripts/install.sh          # Release build, installs /Applications/Swiftwarden.app and starts it
-    scripts/dev.sh              # Debug build "Swiftwarden Dev", runs next to the installed app
-    scripts/build.sh            # Release build into dist/Swiftwarden.app
-    scripts/build.sh Debug      # dist/Swiftwarden Dev.app
+Found a vulnerability? Please open a [private security advisory](https://github.com/list-jonas/Swiftwarden/security/advisories/new) instead of a public issue.
 
-The Debug configuration is a separate app: bundle id `com.listjonas.swiftwarden.dev`, its own settings, keychain items, data folder, orange icon, hammer menu bar icon and ⌥⌘L as quick-fill shortcut. Running from Xcode builds it too, so the installed app stays untouched while you work. The icons live in `App/Resources/AppIcon.icon` and `AppIconDev.icon` (open them in Icon Composer).
+## Build from source
 
-Builds are ad-hoc signed only, so macOS asks for Accessibility access (and Keychain access) again after each reinstall. If autofill stops reacting, toggle Swiftwarden off and on in System Settings → Privacy & Security → Accessibility.
+Requires Xcode 26 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+
+```sh
+git clone https://github.com/list-jonas/Swiftwarden.git
+cd Swiftwarden
+scripts/install.sh     # Release build → /Applications/Swiftwarden.app, then starts it
+```
+
+| Script | What it does |
+|---|---|
+| `scripts/install.sh` | Builds Release, installs to `/Applications` and launches it |
+| `scripts/dev.sh` | Builds and runs **Swiftwarden Dev** next to your installed app |
+| `scripts/build.sh [Release\|Debug]` | Builds into `dist/` |
 
 To work in Xcode, run `xcodegen generate` and open `Swiftwarden.xcodeproj`.
 
-## Layout
+### Dev app
 
-    Core/                       Swift package, no UI
-      Sources/SwiftwardenCore/
-        Crypto/                 EncString, AES/HMAC, RSA + DER, KDFs, Argon2id
-        API/                    server environments, HTTP client, token refresh
-        Vault/                  models, VaultService, TOTP, generator, import/export, URL matching
-      Tests/                    unit tests + integration tests
-    App/Sources/
-      App/                      app entry, AppModel (state, lock, sync), storage, preferences
-      Views/                    SwiftUI screens
-      Autofill/                 Accessibility observer, floating panels, hotkey, fill methods
+The Debug configuration builds a separate app, **Swiftwarden Dev**: its own bundle id (`com.listjonas.swiftwarden.dev`), settings, keychain items and data folder, an orange icon, a hammer menu bar icon and ⌥⌘L as the quick-fill shortcut. Your everyday install stays untouched while you work on the code.
 
-## Tests
+Local builds are ad-hoc signed, so macOS asks for Accessibility and Keychain access again after each reinstall.
 
-    cd Core && swift test
+### Project layout
 
-Unit tests cover BLAKE2b, Argon2id (RFC 9106 vector), PBKDF2, EncString, RSA, TOTP (RFC 6238), the generator, strength scoring, URL matching, CSV parsing and encrypted export.
+```
+Core/                     Swift package, no UI
+  Sources/SwiftwardenCore/
+    Crypto/               EncString, AES/HMAC, RSA, KDFs, Argon2id
+    API/                  server environments, HTTP client, token refresh
+    Vault/                models, sync, TOTP, generator, import/export, URL matching
+  Tests/                  unit and integration tests
+App/
+  Sources/App/            entry point, app state, lock, storage, preferences
+  Sources/Views/          SwiftUI screens
+  Sources/Autofill/       Accessibility observer, panels, hotkey, fill methods
+  Resources/              Liquid Glass icons (AppIcon.icon, AppIconDev.icon)
+Casks/                    Homebrew cask
+```
 
-Integration tests run against a real server. A throwaway Vaultwarden works:
+### Tests
 
-    docker run -d --name vw -e SIGNUPS_ALLOWED=true -p 8787:80 vaultwarden/server
-    cd Core
-    SW_IT_EMAIL=it@test.local SW_IT_PASSWORD='Integration-Pass-123!' SW_IT_PHASE=1 swift test --filter IntegrationTests
-    SW_IT_EMAIL=it@test.local SW_IT_PASSWORD='Integration-Pass-123!' SW_IT_PHASE=2 swift test --filter IntegrationTests
-    SW_SEED_EMAIL=demo@test.local SW_SEED_PASSWORD='Demo-Password-123!' swift test --filter 'SeedTests|OrgTests'
+```sh
+cd Core && swift test
+```
 
-Phase 1 registers an Argon2id account and writes items, history, attachments and a Send. Phase 2 reads items written by the official `bw` CLI (which uses per-item cipher keys), imports and trashes. The org test creates an organization and checks RSA org keys, collections and moving items into the org.
+Unit tests cover BLAKE2b, Argon2id, PBKDF2, EncString, RSA, TOTP, the generator, strength scoring, URL matching, CSV parsing and encrypted export. Integration tests run against a throwaway Vaultwarden and are skipped unless their environment variables are set:
+
+```sh
+docker run -d --name vw -e SIGNUPS_ALLOWED=true -p 8787:80 vaultwarden/server
+cd Core
+SW_IT_EMAIL=it@test.local SW_IT_PASSWORD='Integration-Pass-123!' SW_IT_PHASE=1 swift test --filter IntegrationTests
+SW_IT_EMAIL=it@test.local SW_IT_PASSWORD='Integration-Pass-123!' SW_IT_PHASE=2 swift test --filter IntegrationTests
+SW_SEED_EMAIL=demo@test.local SW_SEED_PASSWORD='Demo-Password-123!' swift test --filter 'SeedTests|OrgTests'
+```
+
+## Releases
+
+CI builds and tests every push and pull request and attaches the app as a build artifact. Pushing a version tag publishes a release and updates the Homebrew cask:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
 
 ## Not supported yet
 
-- Duo and FIDO2/WebAuthn as two-step login methods (they need a browser flow; use authenticator/email or API key login).
-- SSO, trusted-device and Key Connector logins.
-- Creating passkeys and the system-wide AutoFill credential provider (needs an app extension with Apple-provisioned entitlements).
-- Several accounts logged in at once.
-- Bitwarden's SSH agent.
+- Duo and FIDO2/WebAuthn two-step login (use authenticator, email or API key login)
+- SSO, trusted devices and Key Connector
+- Creating passkeys and the system AutoFill credential provider
+- Several accounts at once
+- Bitwarden's SSH agent
 
-Swiftwarden is an independent project and is not affiliated with Bitwarden Inc.
+## Contributing
+
+Issues and pull requests are welcome. Keep the app dependency-free, run `swift test` in `Core`, and use the dev app for manual testing.
+
+## License
+
+[GPL-3.0](LICENSE). You are free to use, fork and modify Swiftwarden. If you distribute a modified version, it has to stay open source under the same license.
+
+Swiftwarden is an independent project and is not affiliated with or endorsed by Bitwarden Inc. Bitwarden is a trademark of Bitwarden Inc.

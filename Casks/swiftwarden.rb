@@ -1,0 +1,37 @@
+cask "swiftwarden" do
+  version "0.0.0"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+
+  url "https://github.com/list-jonas/Swiftwarden/releases/download/v#{version}/Swiftwarden-#{version}.zip"
+  name "Swiftwarden"
+  desc "Native Bitwarden client with autofill for other apps"
+  homepage "https://github.com/list-jonas/Swiftwarden"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  depends_on macos: ">= :sequoia"
+
+  app "Swiftwarden.app"
+
+  postflight do
+    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{appdir}/Swiftwarden.app"]
+  end
+
+  uninstall quit:       "com.listjonas.swiftwarden",
+            login_item: "Swiftwarden"
+
+  zap trash: [
+    "~/Library/Application Support/Swiftwarden",
+    "~/Library/Caches/Swiftwarden",
+    "~/Library/Preferences/com.listjonas.swiftwarden.plist",
+  ]
+
+  caveats <<~EOS
+    Swiftwarden is not signed with an Apple Developer ID. The cask removes the
+    quarantine flag so macOS opens it. Autofill needs Accessibility access:
+      System Settings > Privacy & Security > Accessibility
+  EOS
+end
