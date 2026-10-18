@@ -132,14 +132,29 @@ struct AutofillSettings: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Accessibility access") {
-                    if trusted {
-                        Label("Granted", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    } else {
+                HStack(spacing: 10) {
+                    Image(systemName: trusted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.title2)
+                        .foregroundStyle(trusted ? .green : .orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Accessibility access")
+                        Text(trusted ? "Granted. Swiftwarden can detect fields in other apps." : "Not granted. Autofill in other apps is off.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !trusted {
                         Button("Grant Access…") {
                             AutofillController.shared.requestPermission()
-                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                            openAccessibilityPane()
                         }
+                    }
+                }
+                if !trusted {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Already switched on in System Settings? macOS ties the permission to one build of the app, so updates can leave a stale entry behind.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset Permission") { resetPermission() }
                     }
                 }
             } footer: {
@@ -168,6 +183,20 @@ struct AutofillSettings: View {
         }
         .formStyle(.grouped)
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in trusted = AXIsProcessTrusted() }
+    }
+
+    private func openAccessibilityPane() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    }
+
+    private func resetPermission() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "Accessibility", Flavor.bundleId]
+        try? p.run()
+        p.waitUntilExit()
+        AutofillController.shared.requestPermission()
+        openAccessibilityPane()
     }
 }
 
