@@ -143,7 +143,8 @@ public final class APIClient: @unchecked Sendable {
 
     public func prelogin(email: String) async throws -> PreloginResponse {
         for base in [env.identityURL + "/accounts/prelogin", env.apiURL + "/accounts/prelogin"] {
-            var req = URLRequest(url: URL(string: base)!)
+            guard let url = URL(string: base) else { throw APIError.invalidResponse }
+            var req = URLRequest(url: url)
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSON.encoder.encode(["email": email])
@@ -162,7 +163,8 @@ public final class APIClient: @unchecked Sendable {
     }
 
     public func token(_ fields: [String: String], email: String? = nil) async throws -> TokenResponse {
-        var req = URLRequest(url: URL(string: env.identityURL + "/connect/token")!)
+        guard let url = URL(string: env.identityURL + "/connect/token") else { throw APIError.invalidResponse }
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         if let email { req.setValue(Data(email.utf8).base64URL, forHTTPHeaderField: "Auth-Email") }
@@ -215,9 +217,12 @@ public final class APIClient: @unchecked Sendable {
     }
 
     public func raw(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json", auth: Bool = true) async throws -> Data {
+        let full = path.hasPrefix("http") ? path : env.apiURL + path
+        guard let url = URL(string: full) else { throw APIError.invalidResponse }
+        let auth = auth && (full.hasPrefix(env.apiURL + "/") || full.hasPrefix(env.identityURL + "/"))
         if auth, let t = tokens, t.expires < Date().addingTimeInterval(60) { try? await refresh() }
         func make() -> URLRequest {
-            var req = URLRequest(url: URL(string: path.hasPrefix("http") ? path : env.apiURL + path)!)
+            var req = URLRequest(url: url)
             req.httpMethod = method
             if let body { req.httpBody = body; req.setValue(contentType, forHTTPHeaderField: "Content-Type") }
             if auth, let a = tokens?.access { req.setValue("Bearer \(a)", forHTTPHeaderField: "Authorization") }
@@ -252,7 +257,8 @@ public final class APIClient: @unchecked Sendable {
 
     public func upload(url: String, data: Data, azure: Bool, fileName: String, fallbackPath: String) async throws {
         if azure {
-            var req = URLRequest(url: URL(string: url)!)
+            guard let u = URL(string: url) else { throw APIError.invalidResponse }
+            var req = URLRequest(url: u)
             req.httpMethod = "PUT"
             req.httpBody = data
             req.setValue("BlockBlob", forHTTPHeaderField: "x-ms-blob-type")
@@ -265,7 +271,8 @@ public final class APIClient: @unchecked Sendable {
     }
 
     public func download(_ url: String) async throws -> Data {
-        let (d, r) = try await session.data(from: URL(string: url)!)
+        guard let u = URL(string: url) else { throw APIError.invalidResponse }
+        let (d, r) = try await session.data(from: u)
         try check(d, r)
         return d
     }

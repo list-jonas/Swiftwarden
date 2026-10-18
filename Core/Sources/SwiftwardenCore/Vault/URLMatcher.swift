@@ -1,11 +1,42 @@
 import Foundation
 
+enum PublicSuffix {
+    struct Rules { var exact = Set<String>(); var wildcard = Set<String>(); var exception = Set<String>() }
+
+    static let rules: Rules = {
+        var r = Rules()
+        guard let url = Bundle.module.url(forResource: "public_suffix_list", withExtension: "dat"),
+              let s = try? String(contentsOf: url, encoding: .utf8) else { return r }
+        for line in s.split(whereSeparator: \.isNewline) {
+            let rule = line.lowercased()
+            if rule.hasPrefix("!") { r.exception.insert(String(rule.dropFirst())) }
+            else if rule.hasPrefix("*.") { r.wildcard.insert(String(rule.dropFirst(2))) }
+            else { r.exact.insert(rule) }
+        }
+        return r
+    }()
+
+    static func suffixLabelCount(_ labels: [Substring]) -> Int {
+        let r = rules, n = labels.count
+        for i in 0 ..< n {
+            let cand = labels[i...].joined(separator: ".")
+            if r.exception.contains(cand) { return n - i - 1 }
+            if r.exact.contains(cand) { return n - i }
+            if i + 1 < n, r.wildcard.contains(labels[(i + 1)...].joined(separator: ".")) { return n - i }
+        }
+        return 1
+    }
+}
+
 public enum URLMatcher {
-    static let secondLevel: Set<String> = [
-        "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "com.au", "net.au", "org.au", "edu.au", "co.nz", "org.nz",
-        "co.jp", "ne.jp", "or.jp", "com.br", "net.br", "co.at", "or.at", "gv.at", "ac.at", "co.za", "com.tr", "com.mx", "com.cn",
-        "com.hk", "com.sg", "com.tw", "co.in", "co.kr", "co.il", "com.ar", "com.co", "com.pl", "co.id", "com.my", "com.ph",
-    ]
+    static let launchSchemes: Set<String> = ["http", "https", "ssh", "ftp", "sftp", "irc", "vnc"]
+
+    public static func launchURL(_ uri: String?) -> URL? {
+        guard let s = uri?.trimmingCharacters(in: .whitespaces), !s.isEmpty,
+              let u = URL(string: s.contains("://") ? s : "https://" + s),
+              let scheme = u.scheme?.lowercased(), launchSchemes.contains(scheme), u.host?.isEmpty == false else { return nil }
+        return u
+    }
 
     public static func host(of uri: String) -> String? {
         var s = uri.trimmingCharacters(in: .whitespaces)
@@ -17,11 +48,10 @@ public enum URLMatcher {
 
     public static func baseDomain(_ host: String) -> String {
         if host.allSatisfy({ $0.isNumber || $0 == "." || $0 == ":" }) { return host }
-        let parts = host.split(separator: ".")
-        guard parts.count > 2 else { return host }
-        let last2 = parts.suffix(2).joined(separator: ".")
-        if secondLevel.contains(last2) { return parts.suffix(3).joined(separator: ".") }
-        return last2
+        let labels = host.lowercased().split(separator: ".")
+        guard labels.count > 1 else { return host }
+        let keep = PublicSuffix.suffixLabelCount(labels) + 1
+        return keep >= labels.count ? labels.joined(separator: ".") : labels.suffix(keep).joined(separator: ".")
     }
 
     public static func matches(_ u: LoginUri, url: String, defaultMatch: UriMatch = .domain, equivalents: [[String]] = []) -> Bool {
@@ -45,13 +75,14 @@ public enum URLMatcher {
         }
     }
 
-    public static func matchesApp(_ u: LoginUri, bundleId: String, appName: String) -> Bool {
+    public static func matchesApp(_ u: LoginUri, bundleId: String, appName: String, heuristics: Bool = true) -> Bool {
         guard let raw = u.uri?.lowercased(), !raw.isEmpty else { return false }
         let bid = bundleId.lowercased()
         for prefix in ["macapp://", "iosapp://", "androidapp://", "app://"] where raw.hasPrefix(prefix) {
             return String(raw.dropFirst(prefix.count)) == bid
         }
         if raw == bid { return true }
+        guard heuristics else { return false }
         let name = appName.lowercased().replacingOccurrences(of: " ", with: "")
         guard name.count >= 3, let h = host(of: raw) else { return false }
         let label = baseDomain(h).split(separator: ".").first.map(String.init) ?? ""

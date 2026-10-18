@@ -71,9 +71,36 @@ final class CryptoTests: XCTestCase {
 
     func testEncryptedExportRoundTrip() throws {
         var c = Cipher(type: .login); c.name = "x"; c.login?.password = "pw"
-        let d = try Exporter.encryptedJSON(ciphers: [c], folders: [], password: "filepw", kdf: KdfConfig(type: 0, iterations: 1000))
+        let d = try Exporter.encryptedJSON(ciphers: [c], folders: [], password: "filepw", kdf: KdfConfig(type: 0, iterations: 5000))
         XCTAssertTrue(Importer.needsPassword(d))
         XCTAssertEqual(try Importer.detect(d, password: "filepw").ciphers.first?.login?.password, "pw")
         XCTAssertThrowsError(try Importer.detect(d, password: "nope"))
+    }
+
+    func testPublicSuffixMatching() {
+        XCTAssertFalse(URLMatcher.matches(LoginUri(uri: "https://alice.github.io"), url: "https://evil.github.io"))
+        XCTAssertFalse(URLMatcher.matches(LoginUri(uri: "https://bank.com.ua"), url: "https://evil.com.ua"))
+        XCTAssertTrue(URLMatcher.matches(LoginUri(uri: "https://login.bank.com.ua"), url: "https://www.bank.com.ua"))
+        XCTAssertEqual(URLMatcher.baseDomain("www.city.kawasaki.jp"), "city.kawasaki.jp")
+        XCTAssertEqual(URLMatcher.baseDomain("a.b.kawasaki.jp"), "a.b.kawasaki.jp")
+        XCTAssertEqual(URLMatcher.baseDomain("github.io"), "github.io")
+    }
+
+    func testLaunchURLSchemes() {
+        XCTAssertNotNil(URLMatcher.launchURL("example.com/login"))
+        XCTAssertNil(URLMatcher.launchURL("file:///Applications/Calculator.app"))
+        XCTAssertNil(URLMatcher.launchURL("smb://attacker/share"))
+    }
+
+    func testRejectsUnsafeKdf() {
+        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 0, iterations: 1)))
+        XCTAssertThrowsError(try KeyDerivation.deriveKey(secret: "pw", salt: "s", kdf: KdfConfig(type: 1, iterations: 1, memory: 1, parallelism: 0)))
+        XCTAssertNoThrow(try KdfConfig.argon2Default.validate())
+    }
+
+    func testRejectsMacStrippedEncString() throws {
+        let k = SymmetricCryptoKey.generate()
+        let e = try EncString.encrypt("secret", key: k)
+        XCTAssertThrowsError(try EncString(type: 0, iv: e.iv, data: e.data, mac: nil).decrypt(key: k))
     }
 }

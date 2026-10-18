@@ -86,7 +86,9 @@ struct MenuBarRow: View {
             if hover {
                 if cipher.type == .login {
                     Button { model.copy(cipher.login?.username, "username", sensitive: false) } label: { Image(systemName: "person") }.help("Copy username")
-                    Button { model.withReprompt(cipher) { model.copy(cipher.login?.password, "password") } } label: { Image(systemName: "key") }.help("Copy password")
+                    if cipher.canViewPassword {
+                        Button { model.withReprompt(cipher) { model.copy(cipher.login?.password, "password") } } label: { Image(systemName: "key") }.help("Copy password")
+                    }
                     if let t = cipher.login?.totp, let o = TOTP(t) {
                         Button { model.copy(o.code(), "code") } label: { Image(systemName: "clock") }.help("Copy code")
                     }
@@ -101,7 +103,7 @@ struct MenuBarRow: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture {
-            if cipher.type == .login { model.withReprompt(cipher) { model.copy(cipher.login?.password, "password") } }
+            if cipher.type == .login, cipher.canViewPassword { model.withReprompt(cipher) { model.copy(cipher.login?.password, "password") } }
         }
     }
 }

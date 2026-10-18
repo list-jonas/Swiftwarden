@@ -296,6 +296,7 @@ struct UnlockView: View {
                 }
             }
             .frame(width: 300)
+            if let n = model.unlockNotice { Text(n).foregroundStyle(.secondary).font(.callout).multilineTextAlignment(.center).frame(maxWidth: 340) }
             if let error { Text(error).foregroundStyle(.red).font(.callout) }
             Button("Log out") { model.logout() }.buttonStyle(.link).padding(.top, 8)
         }
@@ -316,7 +317,16 @@ struct UnlockView: View {
                 if usePIN { try await model.unlock(pin: secret) } else { try await model.unlock(password: secret) }
                 secret = ""
             } catch {
-                self.error = usePIN ? "Invalid PIN" : "Invalid master password"
+                if !usePIN {
+                    self.error = "Invalid master password"
+                } else if !model.pinEnabled {
+                    usePIN = false
+                    secret = ""
+                    self.error = "Too many wrong PINs. Unlock with your master password."
+                } else {
+                    let left = model.pinAttemptsLeft
+                    self.error = left <= 3 ? "Invalid PIN. \(left) attempt\(left == 1 ? "" : "s") left." : "Invalid PIN"
+                }
             }
             busy = false
         }

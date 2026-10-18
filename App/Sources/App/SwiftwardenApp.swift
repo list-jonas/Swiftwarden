@@ -32,7 +32,7 @@ struct SwiftwardenApp: App {
                 Button("Copy Username") { model.copy(model.cipher(model.selectedId)?.login?.username, "username", sensitive: false) }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                 Button("Copy Password") {
-                    if let c = model.cipher(model.selectedId) { model.withReprompt(c) { model.copy(c.login?.password, "password") } }
+                    if let c = model.cipher(model.selectedId), c.canViewPassword { model.withReprompt(c) { model.copy(c.login?.password, "password") } }
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 Button("Copy Verification Code") {
@@ -64,5 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppModel.shared.clearPendingClipboard() }
     }
 }

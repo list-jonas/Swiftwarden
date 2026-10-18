@@ -144,7 +144,7 @@ struct ItemDetailView: View {
                     DetailRow(label: i == 0 ? "Website" : "", copy: copier(s, "website")) {
                         HStack(spacing: 6) {
                             Text(URLMatcher.host(of: s) ?? s).lineLimit(1)
-                            if let url = URL(string: s.contains("://") ? s : "https://" + s), URLMatcher.host(of: s) != nil {
+                            if let url = URLMatcher.launchURL(s) {
                                 Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless)
                             }
                         }
@@ -317,7 +317,7 @@ struct SecurityHero: View {
 
     var website: URL? {
         guard let u = cipher.login?.uris?.first(where: { URLMatcher.host(of: $0.uri ?? "") != nil })?.uri else { return nil }
-        return URL(string: u.contains("://") ? u : "https://" + u)
+        return URLMatcher.launchURL(u)
     }
 
     var title: String {
@@ -432,7 +432,7 @@ struct IssueCards: View {
             Divider().padding(.horizontal, 12)
             HStack {
                 Spacer()
-                if let u = cipher.login?.uris?.first?.uri, let url = URL(string: u.contains("://") ? u : "https://" + u) {
+                if let url = cipher.login?.uris?.lazy.compactMap({ URLMatcher.launchURL($0.uri) }).first {
                     Button("Change Password…") { NSWorkspace.shared.open(url) }
                 }
                 if cipher.canEdit {

@@ -8,7 +8,7 @@ let package = Package(
     targets: [
         .target(
             name: "SwiftwardenCore",
-            resources: [.copy("Resources/wordlist.txt")],
+            resources: [.copy("Resources/wordlist.txt"), .copy("Resources/public_suffix_list.dat")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

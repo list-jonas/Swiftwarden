@@ -9,11 +9,13 @@ struct FillTarget {
     let kind: FieldKind
     let frame: CGRect
     let url: String?
+    let verifiedBrowser: Bool
+    let signed: Bool
 
     var isPassword: Bool { kind == .password }
 
     var contextLabel: String {
-        if let url, let h = URLMatcher.host(of: url) { return h }
+        if let url, let h = URLMatcher.host(of: url) { return verifiedBrowser ? h : "\(h) in \(app.localizedName ?? "this app")" }
         return app.localizedName ?? "this app"
     }
 }
@@ -27,21 +29,28 @@ final class AutofillController {
     private(set) var target: FillTarget?
     private var dismissed: AXUIElement?
     private var filling = false
+    private var offerAfterFill: (cipherId: String, target: FillTarget)?
+    private let offerPanel = FloatingPanel(canKey: false)
+    private var offerHideTask: Task<Void, Never>?
     private let suggestions = FloatingPanel(canKey: false)
     private let palette = FloatingPanel(canKey: true)
     private var hotKey: HotKey?
     private var started = false
 
-    static let chromiumBrowsers: Set<String> = [
+    nonisolated static let chromiumBrowsers: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary", "org.chromium.Chromium",
-        "com.brave.Browser", "com.brave.Browser.beta", "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "company.thebrowser.Browser",
-        "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "com.operasoftware.OperaGX", "app.zen-browser.zen", "com.openai.atlas",
-        "ai.perplexity.comet", "com.sigmaos.sigmaos.macos", "com.kagi.kagimacOS",
+        "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.nightly",
+        "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
+        "company.thebrowser.Browser", "company.thebrowser.dia",
+        "com.vivaldi.Vivaldi", "com.vivaldi.Vivaldi.snapshot", "com.operasoftware.Opera", "com.operasoftware.OperaGX",
+        "ai.perplexity.comet", "com.sigmaos.sigmaos.macos", "net.imput.helium", "org.chromium.Thorium",
+        "ru.yandex.desktop.yandex-browser", "com.pushplaylabs.sidekick", "io.wavebox.wavebox",
     ]
 
-    static let browsers: Set<String> = [
-        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition",
-        "org.mozilla.nightly", "net.waterfox.waterfox", "org.torproject.torbrowser", "com.duckduckgo.macos.browser", "com.kagi.kagimacOS",
+    nonisolated static let browsers: Set<String> = [
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.kagi.kagimacOS", "com.kagi.kagimacOS.RC", "com.duckduckgo.macos.browser",
+        "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly", "app.zen-browser.zen",
+        "one.ablaze.floorp", "org.mozilla.librewolf", "net.waterfox.waterfox", "net.mullvad.mullvadbrowser", "org.torproject.torbrowser",
     ]
 
     var trusted: Bool { AXIsProcessTrusted() }
@@ -102,7 +111,8 @@ final class AutofillController {
         guard enabled, trusted, let app, app.processIdentifier != getpid() else { return }
         let pid = app.processIdentifier
         let appEl = AXUIElementCreateApplication(pid)
-        if Self.chromiumBrowsers.contains(app.bundleIdentifier ?? "") {
+        let bid = app.bundleIdentifier ?? ""
+        if Self.chromiumBrowsers.contains(bid) || (Self.browsers.contains(bid) && !bid.hasPrefix("com.apple.")) {
             AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         }
         var obs: AXObserver?
@@ -122,6 +132,10 @@ final class AutofillController {
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return nil }
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
         guard let el = AX.element(appEl, kAXFocusedUIElementAttribute) else { return nil }
+        let bundle = app.bundleIdentifier ?? ""
+        let isBrowserApp = Self.browsers.contains(bundle) || Self.chromiumBrowsers.contains(bundle) || AppIdentity.isVerifiedBrowser(app)
+        if isBrowserApp, AX.webArea(of: el) == nil { return nil }
+        if AX.isSearch(el) { return nil }
         let secure = AX.isSecure(el)
         guard secure || AX.isTextInput(el) || !requireLoginField else { return nil }
         var kind: FieldKind = secure || AX.isTextInput(el) ? AX.kind(el) : .unknown
@@ -132,19 +146,53 @@ final class AutofillController {
         }
         if requireLoginField, kind == .unknown { return nil }
         let frame = AX.frame(el) ?? CGRect(x: NSScreen.main?.frame.midX ?? 400, y: NSScreen.main?.frame.midY ?? 400, width: 1, height: 1)
-        return FillTarget(app: app, element: el, kind: kind, frame: frame, url: webURL(el))
+        let browser = AppIdentity.isVerifiedBrowser(app)
+        let bid = app.bundleIdentifier ?? ""
+        let claimsBrowser = Self.browsers.contains(bid) || Self.chromiumBrowsers.contains(bid)
+        let signed = browser || (!claimsBrowser && AppIdentity.isSigned(app))
+        return FillTarget(app: app, element: el, kind: kind, frame: frame, url: signed ? Self.webURL(el, browser: browser) : nil, verifiedBrowser: browser, signed: signed)
     }
 
-    private func webURL(_ el: AXUIElement) -> String? {
+    nonisolated static func webURL(_ el: AXUIElement, browser: Bool = false) -> String? {
         var cur: AXUIElement? = el
         var n = 0
+        var window: AXUIElement?
         while let c = cur, n < 60 {
-            if AX.string(c, kAXRoleAttribute) == "AXWebArea", let u = AX.url(c) { return u }
+            let role = AX.string(c, kAXRoleAttribute)
+            if role == "AXWebArea", let u = AX.url(c), u.hasPrefix("http") { return u }
+            if role == kAXWindowRole { window = c }
             cur = AX.element(c, kAXParentAttribute)
             n += 1
         }
-        if let w = AX.element(el, kAXWindowAttribute), let doc = AX.string(w, kAXDocumentAttribute), doc.hasPrefix("http") { return doc }
+        let win = window ?? AX.element(el, kAXWindowAttribute)
+        if let w = win, let doc = AX.string(w, kAXDocumentAttribute), doc.hasPrefix("http") { return doc }
+        guard browser, let w = win else { return nil }
+        return addressBarURL(in: w)
+    }
+
+    nonisolated static func addressBarURL(in window: AXUIElement) -> String? {
+        let hints = ["address", "url", "location", "adresse", "search or enter", "suchen oder", "urlbar", "omnibox"]
+        var stack = [window]
+        var visited = 0
+        while let e = stack.popLast(), visited < 800 {
+            visited += 1
+            let role = AX.string(e, kAXRoleAttribute)
+            if role == "AXWebArea" { continue }
+            if role == kAXTextFieldRole || role == kAXComboBoxRole {
+                let label = [kAXDescriptionAttribute, kAXIdentifierAttribute, kAXPlaceholderValueAttribute, kAXTitleAttribute, "AXDOMIdentifier"]
+                    .compactMap { AX.string(e, $0) }.joined(separator: " ").lowercased()
+                if hints.contains(where: label.contains), let v = AX.string(e, kAXValueAttribute), let u = normalizedURL(v) { return u }
+            }
+            stack.append(contentsOf: AX.children(e).reversed())
+        }
         return nil
+    }
+
+    nonisolated static func normalizedURL(_ raw: String) -> String? {
+        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty, !v.contains(" "), v.contains(".") || v.hasPrefix("http") || v.hasPrefix("localhost") else { return nil }
+        let full = v.hasPrefix("http://") || v.hasPrefix("https://") ? v : "https://" + v
+        return URLMatcher.host(of: full) == nil ? nil : full
     }
 
     func candidates(_ t: FillTarget) -> [Cipher] {
@@ -156,7 +204,7 @@ final class AutofillController {
         let logins: [Cipher]
         if let u = t.url { logins = m.matches(url: u) }
         else if isBrowser { logins = [] }
-        else { logins = m.matches(bundleId: t.app.bundleIdentifier ?? "", appName: t.app.localizedName ?? "") }
+        else { logins = m.matches(bundleId: t.app.bundleIdentifier ?? "", appName: t.app.localizedName ?? "", heuristics: t.signed) }
         switch t.kind {
         case .totp:
             let withCode = logins.filter(\.hasTotp)
@@ -199,6 +247,68 @@ final class AutofillController {
         suggestions.show(view, near: t.frame)
     }
 
+    // MARK: Remember site / app
+
+    func fillFromSearch(_ c: Cipher, into t: FillTarget) {
+        palette.hide()
+        offerAfterFill = shouldOfferToRemember(c, t) ? (c.id, t) : nil
+        fill(c, into: t)
+    }
+
+    func rememberURI(for t: FillTarget) -> String? {
+        let bid = t.app.bundleIdentifier ?? ""
+        let isBrowserApp = Self.browsers.contains(bid) || Self.chromiumBrowsers.contains(bid)
+        if let u = t.url, let host = URLMatcher.host(of: u) {
+            return (u.lowercased().hasPrefix("http://") ? "http://" : "https://") + host
+        }
+        guard !isBrowserApp, t.signed, !bid.isEmpty else { return nil }
+        return "macapp://" + bid
+    }
+
+    func rememberPlace(for t: FillTarget) -> String {
+        if let u = t.url, let host = URLMatcher.host(of: u) { return host }
+        return t.app.localizedName ?? "this app"
+    }
+
+    func shouldOfferToRemember(_ c: Cipher, _ t: FillTarget) -> Bool {
+        guard c.type == .login, c.canEdit, !c.isDeleted, let uri = rememberURI(for: t) else { return false }
+        if candidates(t).contains(where: { $0.id == c.id }) { return false }
+        return !(c.login?.uris ?? []).contains { ($0.uri ?? "").lowercased() == uri.lowercased() }
+    }
+
+    private func showRememberOffer(_ o: (cipherId: String, target: FillTarget)) {
+        guard let c = AppModel.shared.cipher(o.cipherId), let uri = rememberURI(for: o.target) else { return }
+        let place = rememberPlace(for: o.target)
+        let view = RememberOfferView(cipher: c, place: place,
+                                     onSave: { AutofillController.shared.saveRemembered(cipherId: o.cipherId, uri: uri, place: place) },
+                                     onDismiss: { AutofillController.shared.offerPanel.hide() })
+            .environment(AppModel.shared)
+        offerPanel.show(view, near: o.target.frame)
+        offerHideTask?.cancel()
+        offerHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(15))
+            guard !Task.isCancelled else { return }
+            AutofillController.shared.offerPanel.hide()
+        }
+    }
+
+    private func saveRemembered(cipherId: String, uri: String, place: String) {
+        offerPanel.hide()
+        let m = AppModel.shared
+        guard var c = m.cipher(cipherId) else { return }
+        guard !(c.login?.uris ?? []).contains(where: { ($0.uri ?? "").lowercased() == uri.lowercased() }) else { return }
+        let uris = (c.login?.uris ?? []).filter { !($0.uri ?? "").isEmpty } + [LoginUri(uri: uri)]
+        c.login?.uris = uris
+        Task {
+            do {
+                _ = try await m.save(c)
+                m.showToast("\(c.displayName) will be suggested on \(place)")
+            } catch {
+                m.errorMessage = "Could not save: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func hotKeyPressed() {
         guard trusted else { requestPermission(); return }
         let t = currentTarget(requireLoginField: false)
@@ -212,7 +322,7 @@ final class AutofillController {
     func openPalette(_ t: FillTarget) {
         suggestions.hide()
         let view = QuickFillView(target: t, initial: candidates(t),
-                                 onFill: { c in AutofillController.shared.palette.hide(); AutofillController.shared.fill(c, into: t) },
+                                 onFill: { c in AutofillController.shared.fillFromSearch(c, into: t) },
                                  onClose: { AutofillController.shared.palette.hide() })
             .environment(AppModel.shared)
         palette.show(view, near: t.frame, key: true)
@@ -222,8 +332,11 @@ final class AutofillController {
 
     func fill(_ c: Cipher, into t: FillTarget) {
         suggestions.hide()
+        offerPanel.hide()
+        let offer = offerAfterFill
+        offerAfterFill = nil
         let m = AppModel.shared
-        guard c.needsReprompt && !m.repromptPassed.contains(c.id) else { performFill(c, t); return }
+        guard c.needsReprompt && !m.repromptPassed.contains(c.id) else { performFill(c, t, offer: offer); return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Confirm master password"
@@ -238,14 +351,14 @@ final class AutofillController {
         Task {
             if await m.verifyMasterPassword(pw) {
                 m.repromptPassed.insert(c.id)
-                performFill(c, t)
+                performFill(c, t, offer: offer)
             } else {
                 m.showToast("Invalid master password")
             }
         }
     }
 
-    private func performFill(_ c: Cipher, _ t: FillTarget) {
+    private func performFill(_ c: Cipher, _ t: FillTarget, offer: (cipherId: String, target: FillTarget)? = nil) {
         var plan: [(AXUIElement, String)]
         switch c.type {
         case .login: plan = loginPlan(c, t)
@@ -261,31 +374,45 @@ final class AutofillController {
         let origin = t.element
         let others = plan.filter { !CFEqual($0.0, origin) }
         let own = plan.filter { CFEqual($0.0, origin) }
+        let pid = app.processIdentifier
+        let host = t.url.flatMap(URLMatcher.host(of:))
+        let viaBrowser = t.verifiedBrowser
         filling = true
         suggestions.hide()
         DispatchQueue.global(qos: .userInitiated).async {
+            var completed = false
             defer {
                 usleep(250_000)
+                let showOffer = completed ? offer : nil
                 DispatchQueue.main.async {
                     let s = AutofillController.shared
                     s.dismissed = origin
                     s.filling = false
+                    if let showOffer { s.showRememberOffer(showOffer) }
                 }
             }
             Filler.waitForModifiersReleased()
             app.activate()
-            usleep(120_000)
-            var moved = false
-            for (el, text) in others where !Filler.setQuietly(text, on: el) {
+            func cancel() { DispatchQueue.main.async { AppModel.shared.showToast("Fill canceled: the window or page changed") } }
+            guard Filler.waitFront(pid) else { cancel(); return }
+            usleep(60000)
+            if let host, Self.webURL(origin, browser: viaBrowser).flatMap(URLMatcher.host(of:)) != host { cancel(); return }
+            let failed = others.filter { !Filler.setQuietly($0.1, on: $0.0) }
+            for (el, text) in failed {
+                guard Filler.frontPid() == pid else { cancel(); return }
                 Filler.set(text, on: el, method: method)
-                moved = true
                 usleep(80_000)
             }
-            if own.isEmpty, moved {
+            if own.isEmpty, !failed.isEmpty {
                 AXUIElementSetAttributeValue(origin, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             }
-            for (el, text) in own { Filler.set(text, on: el, method: method) }
-            if submit { Filler.key(UInt16(kVK_Return)) }
+            for (el, text) in own {
+                guard Filler.frontPid() == pid else { cancel(); return }
+                Filler.set(text, on: el, method: method)
+            }
+            for (el, text) in plan where !Filler.matches(el, text) { _ = Filler.setQuietly(text, on: el) }
+            completed = true
+            if submit, Filler.frontPid() == pid { Filler.key(UInt16(kVK_Return)) }
             guard let totpSecret else { return }
             if method == "paste" { usleep(700_000) }
             DispatchQueue.main.async {
@@ -400,6 +527,21 @@ final class AutofillController {
 }
 
 enum Filler {
+    static func frontPid() -> pid_t? {
+        var pid: pid_t = 0
+        guard let app = AX.element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
+              AXUIElementGetPid(app, &pid) == .success else { return nil }
+        return pid
+    }
+
+    static func waitFront(_ pid: pid_t) -> Bool {
+        for _ in 0 ..< 30 {
+            if frontPid() == pid { return true }
+            usleep(40000)
+        }
+        return false
+    }
+
     static func waitForModifiersReleased() {
         let mask: CGEventFlags = [.maskCommand, .maskShift, .maskAlternate, .maskControl]
         for _ in 0 ..< 100 {
@@ -446,18 +588,53 @@ enum Filler {
 
     static func setQuietly(_ text: String, on el: AXUIElement) -> Bool {
         guard !AX.isSecure(el) else { return false }
-        guard AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString) == .success else { return false }
-        usleep(40000)
-        return AX.string(el, kAXValueAttribute) == text
+        func attempt() -> Bool {
+            guard AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString) == .success else { return false }
+            for _ in 0 ..< 6 {
+                usleep(40000)
+                if AX.string(el, kAXValueAttribute) == text { return true }
+            }
+            return false
+        }
+        for _ in 0 ..< 2 {
+            guard focus(el) else { continue }
+            if attempt() {
+                usleep(120_000)
+                return true
+            }
+        }
+        return false
+    }
+
+    static func isFocused(_ el: AXUIElement) -> Bool {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(el, &pid) == .success,
+              let f = AX.element(AXUIElementCreateApplication(pid), kAXFocusedUIElementAttribute) else { return false }
+        return CFEqual(f, el)
+    }
+
+    static func focus(_ el: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        for _ in 0 ..< 25 {
+            usleep(30000)
+            if isFocused(el) {
+                usleep(250_000)
+                return isFocused(el)
+            }
+        }
+        return false
     }
 
     static func set(_ text: String, on el: AXUIElement, method: String) {
-        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        usleep(60000)
+        guard focus(el) else {
+            AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
+            return
+        }
         switch method {
         case "value":
             if AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString) != .success { fallthrough }
         case "paste":
+            guard isFocused(el) else { break }
             DispatchQueue.main.sync {
                 let pb = NSPasteboard.general
                 let old = pb.string(forType: .string)
@@ -472,15 +649,14 @@ enum Filler {
                 }
             }
         default:
-            clearAndType(text, delay: 6000)
+            if isFocused(el) { clearAndType(text, delay: 6000) }
         }
         usleep(200_000)
         if matches(el, text) { return }
         AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
         usleep(150_000)
         if matches(el, text) { return }
-        AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        usleep(80000)
+        guard focus(el) else { return }
         clearAndType(text, delay: 15000)
     }
 }
@@ -519,6 +695,18 @@ final class HotKey {
         }, 1, &spec, nil, nil)
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

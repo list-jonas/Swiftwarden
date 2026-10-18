@@ -146,3 +146,32 @@ extension Array {
 }
 
 
+
+struct RememberOfferView: View {
+    let cipher: Cipher
+    let place: String
+    let onSave: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ItemIcon(cipher: cipher, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Remember for \(place)?").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text("Suggest “\(cipher.displayName)” here next time.").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack {
+                Spacer()
+                Button("Not Now", action: onDismiss).controlSize(.small)
+                Button("Save", action: onSave).controlSize(.small).buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(12)
+        .frame(width: 300)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.1)))
+    }
+}

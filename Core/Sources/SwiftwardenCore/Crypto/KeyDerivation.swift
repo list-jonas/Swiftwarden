@@ -12,12 +12,24 @@ public struct KdfConfig: Codable, Hashable, Sendable {
 
     public static let pbkdf2Default = KdfConfig(type: 0, iterations: 600_000)
     public static let argon2Default = KdfConfig(type: 1, iterations: 3, memory: 64, parallelism: 4)
+
+    public func validate() throws {
+        switch type {
+        case 0:
+            guard (5_000 ... 2_000_000).contains(iterations) else { throw CryptoError.unsafeKdf }
+        case 1:
+            guard (2 ... 10).contains(iterations), (16 ... 1024).contains(memory ?? 64), (1 ... 16).contains(parallelism ?? 4) else { throw CryptoError.unsafeKdf }
+        default:
+            throw CryptoError.unsafeKdf
+        }
+    }
 }
 
 public enum KeyDerivation {
     static func normalize(_ email: String) -> String { email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
 
     public static func deriveKey(secret: String, salt: String, kdf: KdfConfig) throws -> Data {
+        try kdf.validate()
         let pw = Data(secret.utf8)
         if kdf.type == 1 {
             let saltHash = Primitives.sha256(Data(salt.utf8))

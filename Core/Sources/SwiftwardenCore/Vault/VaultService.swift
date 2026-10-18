@@ -255,8 +255,10 @@ public final class VaultService: @unchecked Sendable {
 
     func dec(_ s: String?, _ key: SymmetricCryptoKey) -> String? {
         guard let s, !s.isEmpty else { return s }
-        do { return try EncString(s).decryptString(key: key) } catch { return "[decryption error]" }
+        do { return try EncString(s).decryptString(key: key) } catch { return Self.decryptionError }
     }
+
+    public static let decryptionError = "[decryption error]"
 
     public func itemKey(_ c: Cipher) throws -> SymmetricCryptoKey {
         guard let base = keys.key(for: c.organizationId) else { throw CryptoError.invalidKey }
@@ -286,6 +288,12 @@ public final class VaultService: @unchecked Sendable {
             x.login = l
         }
         x.fields = x.fields?.filter { !($0.name ?? "").isEmpty || !($0.value ?? "").isEmpty }
+        var check = x
+        check.attachments = nil
+        _ = try check.mapStrings { s in
+            if s == Self.decryptionError { throw CryptoError.undecryptableItem }
+            return s
+        }
         return try x.mapStrings { s in
             guard let s, !s.isEmpty else { return nil }
             return try EncString.encrypt(s, key: key).description

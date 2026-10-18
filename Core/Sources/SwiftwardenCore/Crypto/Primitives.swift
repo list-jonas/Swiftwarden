@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 
 public enum CryptoError: LocalizedError {
-    case invalidEncString, macMismatch, decryptFailed, encryptFailed, invalidKey, rsa(String), kdf
+    case invalidEncString, macMismatch, decryptFailed, encryptFailed, invalidKey, rsa(String), kdf, unsafeKdf, undecryptableItem
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +14,8 @@ public enum CryptoError: LocalizedError {
         case .invalidKey: "Invalid key"
         case let .rsa(m): "RSA error: \(m)"
         case .kdf: "Key derivation failed"
+        case .unsafeKdf: "The server sent unsafe key derivation settings. Login was stopped to protect your master password."
+        case .undecryptableItem: "Parts of this item couldn't be decrypted, so it can't be saved without losing data."
         }
     }
 }

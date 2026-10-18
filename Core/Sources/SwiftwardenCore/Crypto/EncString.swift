@@ -82,10 +82,13 @@ public struct EncString: Hashable, Sendable, CustomStringConvertible {
 
     public func decrypt(key: SymmetricCryptoKey) throws -> Data {
         guard let iv else { throw CryptoError.invalidEncString }
-        if type == 2 || type == 1 {
+        switch type {
+        case 2:
             guard let macKey = key.macKey, let mac else { throw CryptoError.invalidKey }
             guard Primitives.constantTimeEqual(Primitives.hmacSHA256(iv + data, key: macKey), mac) else { throw CryptoError.macMismatch }
-        } else if type != 0 {
+        case 0:
+            guard key.macKey == nil else { throw CryptoError.invalidEncString }
+        default:
             throw CryptoError.invalidEncString
         }
         return try Primitives.aesDecrypt(data, key: key.encKey, iv: iv)
