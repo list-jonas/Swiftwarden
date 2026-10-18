@@ -46,8 +46,10 @@ enum AX {
 
     static func hints(_ el: AXUIElement) -> FieldHints {
         var t: [String] = []
+        let current = string(el, kAXValueAttribute)?.trimmingCharacters(in: .whitespaces) ?? ""
         for a in [kAXPlaceholderValueAttribute, kAXDescriptionAttribute, kAXTitleAttribute, kAXIdentifierAttribute, "AXDOMIdentifier", kAXHelpAttribute] {
-            if let s = string(el, a), !s.isEmpty, s.count < 120 { t.append(s) }
+            if let s = string(el, a), !s.isEmpty, s.count < 120,
+               current.isEmpty || s.trimmingCharacters(in: .whitespaces) != current { t.append(s) }
         }
         if let classes = raw(el, "AXDOMClassList") as? [String] { t += classes.prefix(6) }
         if let label = element(el, kAXTitleUIElementAttribute) {
