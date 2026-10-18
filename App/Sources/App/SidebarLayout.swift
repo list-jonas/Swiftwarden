@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftwardenCore
 
@@ -197,5 +198,30 @@ final class SidebarLayout {
         let fallback = visibleSections.lazy.compactMap { self.visibleItems($0).first }.first ?? .all
         model.sidebar = fallback
         model.selectedId = nil
+    }
+}
+
+@MainActor @Observable
+final class CommandKey {
+    static let shared = CommandKey()
+    private(set) var down = NSEvent.modifierFlags.contains(.command)
+    @ObservationIgnored private var monitor: Any?
+
+    private init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { e in
+            let d = e.modifierFlags.contains(.command)
+            MainActor.assumeIsolated { if CommandKey.shared.down != d { CommandKey.shared.down = d } }
+            return e
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { CommandKey.shared.down = false }
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func draggable(_ key: String, when on: Bool) -> some View {
+        if on { draggable(key) } else { self }
     }
 }

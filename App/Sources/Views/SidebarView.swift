@@ -75,7 +75,7 @@ struct SidebarView: View {
                             row(i, i.label)
                         }
                     }
-                    .onMove { layout.moveItems(section, $0, $1, visibleOnly: true) }
+                    .onMove(perform: CommandKey.shared.down ? { layout.moveItems(section, $0, $1, visibleOnly: true) } : nil)
                 } header: { header(section) }
             }
         case .folders:
@@ -168,7 +168,7 @@ struct Tile: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
-        .draggable(item.key)
+        .draggable(item.key, when: CommandKey.shared.down)
         .dropDestination(for: String.self) { keys, _ in
             guard let k = keys.first else { return false }
             withAnimation { SidebarLayout.shared.move(k, before: item) }

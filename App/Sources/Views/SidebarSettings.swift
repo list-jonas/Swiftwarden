@@ -38,7 +38,7 @@ struct SidebarSettings: View {
             .listStyle(.inset(alternatesRowBackgrounds: false))
 
             HStack {
-                Text("Drag to reorder. Right-click the sidebar to hide items.")
+                Text("Drag to reorder here, or hold ⌘ and drag in the sidebar. Right-click the sidebar to hide items.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Restore Defaults") { layout.reset() }
